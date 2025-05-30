@@ -1,50 +1,138 @@
-# Verifiable Distributed Point Functions (Modified by Chenghao Li)
+# V-DMPF: C Implementation of Big-State DMPF
 
-Implementation of VDPFs in C with a Go wrapper. See the [paper](https://eprint.iacr.org/2021/580.pdf) for details.
+这是一个基于Rust代码实现的C语言版本的Big-State DMPF (Distributed Multi-Point Function)。
 
-## Dependencies 
-* Go 1.13 or higher 
-* OpenSSL 1.1.1f
-* GNU Make
-* Cmake
+## 概述
 
-## Getting everything to run (tested on Ubuntu, CentOS, and MacOS)
+DMPF是一种密码学原语，允许在多个输入点上安全地评估函数。这个实现基于"big state"方法，该方法通过维护较大的状态来优化性能，特别适用于批量操作。
 
-|Install dependencies (Ubuntu): | Install dependencies (CentOS):|
-|--------------|-----------|
-|```sudo apt-get install build-essential``` |  ```sudo yum groupinstall 'Development Tools'```|
-|```sudo apt-get install cmake```| ```sudo yum install cmake```|
-|```sudo apt install libssl-dev```|```sudo yum install openssl-devel```|
-|```sudo apt-get install golang-go```| ```sudo yum install golang```|
+## 主要特性
 
+- **Big-State架构**: 参考Rust代码中的`big_state.rs`实现
+- **批处理优化**: 支持批量操作以提高性能
+- **二叉树结构**: 使用trie结构优化输入处理
+- **内存安全**: 适当的内存管理和错误处理
 
-For optimal performance, you should compile the C code with clang (approximately 10-20 percent faster than the default on some distributions).
-- Clang-11: On Ubuntu run ```sudo apt install clang```.  On CentOS, ```sudo yum install clang```.
-  - You'll also need llvm if you use clang. 
-- LLVM-AR: On Ubuntu run ```sudo apt install llvm```. On CentOS, ```sudo yum install llvm```.
+## 文件结构
 
-### 1) Compiling the C VDPF/DPF library
 ```
-go mod tidy
-cd src && make
+├── include/
+│   ├── common.h      # 通用定义和辅助函数
+│   ├── dpf.h         # DPF相关定义
+│   ├── dmpf.h        # DMPF相关定义 (新增)
+│   └── mmo.h         # MMO哈希相关
+├── src/
+│   ├── common.c      # 通用函数实现
+│   ├── dpf.c         # DPF实现
+│   ├── dmpf.c        # DMPF实现 (新增)
+│   └── mmo.c         # MMO哈希实现
+├── test_dmpf.c       # 测试程序
+├── Makefile          # 构建配置
+└── README.md         # 本文件
 ```
 
-### 2a) Running tests (in C) 
-```
-./test
-```
-See also [```src/test.c```](src/test.c)
+## 核心组件
 
-### 2b) Running tests (in Go)
+### 数据结构
+
+1. **Signs**: 维护符号位的数据结构
+2. **SignsCW**: 校正字的符号数据结构
+3. **BinaryTrie**: 用于输入组织的二叉树
+4. **CW**: 校正字结构
+5. **ConvCW**: 转换校正字结构
+6. **BigStateDmpfKey**: DMPF密钥结构
+
+### 主要函数
+
+- `genBigStateDMPF()`: 生成DMPF密钥对
+- `evalBigStateDMPF()`: 在单个点评估DMPF
+- `genDMPF()`: 标准DMPF接口（委托给big state实现）
+
+## 编译和运行
+
+### 依赖
+
+- GCC编译器
+- OpenSSL库 (`libssl-dev`)
+
+### 编译
+
+```bash
+make
 ```
-go test
+
+### 运行测试
+
+```bash
+make test
 ```
-See also [```dpf_test.go```](dpf_test.go)
 
-## ⚠️ Important Warning
-<b>This implementation of is intended for *research purposes only*. The code has NOT been vetted by security experts. 
-As such, no portion of the code should be used in any real-world or production setting!</b>
+### 清理
 
-## Reference
+```bash
+make clean
+```
 
-This repo is mainly based on Servan-Schreiber and Simon Langowski's implementation for [vdpf](https://github.com/sachaservan/vdpf). Thanks a lot for their comtributions!
+## 使用示例
+
+```c
+#include "include/dmpf.h"
+
+// 初始化OpenSSL上下文
+uint8_t key[16] = {0};
+EVP_CIPHER_CTX *ctx = getDPFContext(key);
+
+// 定义参数
+int domain_size = 8;
+int data_size = 4;
+uint64_t inputs[] = {10, 50, 200};  // 必须排序
+uint64_t num_inputs = 3;
+
+// 分配密钥空间
+uint8_t *k0 = malloc(1024);
+uint8_t *k1 = malloc(1024);
+
+// 生成DMPF
+genDMPF(ctx, domain_size, data_size, inputs, num_inputs, k0, k1);
+
+// 评估
+uint8_t output0[4], output1[4];
+evalBigStateDMPF(ctx, k0, 10, data_size, output0);
+evalBigStateDMPF(ctx, k1, 10, data_size, output1);
+
+// output0 XOR output1 应该等于输入点10的数据
+```
+
+## 实现细节
+
+### 与Rust代码的对应关系
+
+这个C实现直接对应Rust代码中的以下组件：
+
+- `Signs` ↔ `big_state.rs::Signs`
+- `SignsCW` ↔ `big_state.rs::SignsCW`
+- `BinaryTrie` ↔ `trie.rs::BinaryTrie`
+- `CW` ↔ `big_state.rs::CW`
+- `ConvCW` ↔ `big_state.rs::ConvCW`
+
+### 优化特性
+
+1. **批处理**: 使用预计算表优化批量操作
+2. **内存布局**: 优化的内存布局以提高缓存性能
+3. **Tree traversal**: 高效的二叉树遍历算法
+
+## 安全性
+
+- 使用OpenSSL的加密安全PRG
+- 适当的随机数生成
+- 内存清理以防止信息泄露
+
+## 限制
+
+- 输入必须预先排序
+- 当前实现是简化版本，可能需要进一步优化以达到生产级性能
+- 密钥序列化格式是简化的
+
+## 许可证
+
+本实现基于原始V-DMPF项目的许可证。
