@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
+	"slices"
 	"testing"
 	"time"
 )
@@ -220,6 +221,158 @@ func TestCorrectVerifiablePointFunctionFullDomain(t *testing.T) {
 	}
 }
 
+func TestCorrectMultiPointFunctionTwoServer(t *testing.T) {
+
+	for trial := 0; trial < numTrials; trial++ {
+		num := 1 << 4
+		// Generate unique random indices to ensure strictly ascending order
+		usedIndices := make(map[uint64]bool)
+		specialIndexes := make([]uint64, 0, 10)
+		for len(specialIndexes) < 10 {
+			idx := uint64(rand.Intn(num))
+			if !usedIndices[idx] {
+				usedIndices[idx] = true
+				specialIndexes = append(specialIndexes, idx)
+			}
+		}
+		// Sort specialIndexes in ascending order as required by the C++ implementation
+		slices.Sort(specialIndexes)
+		data := make([]byte, 10)
+		for i := range data {
+			data[i] = byte(rand.Intn(256))
+		}
+
+		prfKey := GeneratePRFKey()
+
+		client := DMPFInitialize(prfKey)
+		keyA, keyB := client.GenDMPFKeys(specialIndexes, 4, 10, 1, data)
+
+		server := DMPFInitialize(prfKey)
+
+		indices := make([]uint64, num)
+		for i := 0; i < num; i++ {
+			indices[i] = uint64(rand.Intn(num))
+		}
+		// sort indices
+		slices.Sort(indices)
+
+		// test specialIndexes
+		for i := 0; i < 10; i++ {
+			ans0 := server.EvalDMPF(keyA, specialIndexes[i])
+			ans1 := server.EvalDMPF(keyB, specialIndexes[i])
+			if ans0[0]^ans1[0] != data[i] {
+				fmt.Printf("specialIndexes[i] = %v\n", specialIndexes[i])
+				fmt.Printf("ans0 = %v\n", ans0)
+				fmt.Printf("ans1 = %v\n", ans1)
+				fmt.Printf("data = %v\n", data)
+				t.Fatalf("Expected: %v Got: %v", ans0[0]^ans1[0], data[i])
+			}
+		}
+
+		// test non-specialIndexes
+		for i := 0; i < num; i++ {
+			if slices.Contains(specialIndexes, uint64(i)) {
+				continue
+			}
+			ans0 := server.EvalDMPF(keyA, uint64(i))
+			ans1 := server.EvalDMPF(keyB, uint64(i))
+			if ans0[0]^ans1[0] != 0 {
+				fmt.Printf("indices[i] = %v\n", uint64(i))
+				fmt.Printf("ans0 = %v\n", ans0)
+				fmt.Printf("ans1 = %v\n", ans1)
+				t.Fatalf("Expected: %v Got: %v", 0, ans0[0]^ans1[0])
+			}
+		}
+	}
+}
+
+func TestCorrectMultiPointFunctionTwoServerFullDomain(t *testing.T) {
+
+	for trial := 0; trial < numTrials; trial++ {
+		num := 1 << 4
+		// Generate unique random indices to ensure strictly ascending order
+		usedIndices := make(map[uint64]bool)
+		specialIndexes := make([]uint64, 0, 10)
+		for len(specialIndexes) < 10 {
+			idx := uint64(rand.Intn(num))
+			if !usedIndices[idx] {
+				usedIndices[idx] = true
+				specialIndexes = append(specialIndexes, idx)
+			}
+		}
+		// Sort specialIndexes in ascending order as required by the C++ implementation
+		slices.Sort(specialIndexes)
+		data := make([]byte, 10)
+		for i := range data {
+			data[i] = byte(specialIndexes[i])
+		}
+		prfKey := GeneratePRFKey()
+		client := DMPFInitialize(prfKey)
+
+		keyA, keyB := client.GenDMPFKeys(specialIndexes, 4, 10, 1, data)
+
+		server := DMPFInitialize(prfKey)
+
+		ans0 := server.FullDomainEval(keyA)
+		ans1 := server.FullDomainEval(keyB)
+
+		for i := 0; i < num; i++ {
+			if slices.Contains(specialIndexes, uint64(i)) {
+				// Find the position of i in specialIndexes array
+				var dataIndex int
+				for j, idx := range specialIndexes {
+					if idx == uint64(i) {
+						dataIndex = j
+						break
+					}
+				}
+				// check if the data is correct
+				if ans0[i]^ans1[i] != data[dataIndex] {
+					t.Fatalf("Expected: %v Got: %v", ans0[i], ans1[i])
+				}
+			} else {
+				// check if the data is 0
+				if ans0[i]^ans1[i] != 0 {
+					fmt.Printf("indices[i] = %v\n", uint64(i))
+					fmt.Printf("ans0 = %v\n", ans0)
+					fmt.Printf("ans1 = %v\n", ans1)
+					fmt.Printf("data = %v\n", data)
+					t.Fatalf("Expected: %v Got: %v", 0, ans0[i]^ans1[i])
+				}
+			}
+		}
+	}
+}
+
+func BenchmarkDPFFullDomain(b *testing.B) {
+	// different dataSize
+	dataSizes := []int{10, 100, 1000, 10000, 100000}
+	for _, dataSize := range dataSizes {
+		prfKey := GeneratePRFKey()
+		client := DPFInitialize(prfKey)
+		server := DPFInitialize(prfKey)
+
+		rangeSize := 6 // log2(64)
+		specialIndex := uint64(rand.Intn(1 << rangeSize))
+		data := make([]byte, dataSize)
+		rand.Read(data)
+
+		keyA, keyB := client.GenDPFKeys(specialIndex, uint(rangeSize), uint(dataSize), data)
+
+		// time the full domain evaluation
+		start := time.Now()
+		ans0 := server.FullDomainEval(keyA)
+		ans1 := server.FullDomainEval(keyB)
+		elapsed := time.Since(start)
+
+		// Verify that the results are consistent
+		if len(ans0) != len(ans1) {
+			b.Fatalf("DPF FullDomain failed for dataSize: %d", dataSize)
+		}
+		fmt.Printf("DPF FullDomain time: %s, dataSize: %d, resultSize: %d\n", elapsed, dataSize, len(ans0))
+	}
+}
+
 func BenchmarkVDPFVerification(b *testing.B) {
 	// different dataSize
 	dataSizes := []int{10, 100, 1000, 10000, 100000}
@@ -229,7 +382,7 @@ func BenchmarkVDPFVerification(b *testing.B) {
 		server := VDPFInitialize(prfKey, hashKeys)
 		client := VDPFInitialize(prfKey, hashKeys)
 
-		rangeSize := 7	// log2(128)
+		rangeSize := 7 // log2(128)
 		specialIndex := uint64(rand.Intn(dataSize))
 		data := make([]byte, dataSize)
 		rand.Read(data)
@@ -248,6 +401,86 @@ func BenchmarkVDPFVerification(b *testing.B) {
 		}
 		elapsed := time.Since(start)
 		fmt.Printf("VDPF Verification time: %s\n, dataSize: %d\n", elapsed, dataSize)
+	}
+}
+
+func BenchmarkDMPFGenEval(b *testing.B) {
+	// different dataSize
+	dataSizes := []int{10, 100, 1000, 10000, 100000}
+	for _, dataSize := range dataSizes {
+		prfKey := GeneratePRFKey()
+		client := DMPFInitialize(prfKey)
+		server := DMPFInitialize(prfKey)
+
+		rangeSize := 6 // log2(64)
+		rangePoint := 4
+		specialIndexes := make([]uint64, rangePoint)
+		used := make(map[uint64]bool)
+		num := 1 << rangeSize
+		for i := 0; i < rangePoint; {
+			idx := uint64(rand.Intn(num))
+			if !used[idx] {
+				used[idx] = true
+				specialIndexes[i] = idx
+				i++
+			}
+		}
+		slices.Sort(specialIndexes)
+		data := make([]byte, rangePoint*dataSize)
+		rand.Read(data)
+
+		// time the key generation & evaluation
+		start := time.Now()
+		keyA, keyB := client.GenDMPFKeys(specialIndexes, uint(rangeSize), uint(rangePoint), uint(dataSize), data)
+
+		// Evaluate for all special indices
+		for j := 0; j < rangePoint; j++ {
+			_ = server.EvalDMPF(keyA, specialIndexes[j])
+			_ = server.EvalDMPF(keyB, specialIndexes[j])
+		}
+		elapsed := time.Since(start)
+		fmt.Printf("DMPF GenEval time: %s, dataSize: %d\n", elapsed, dataSize)
+	}
+}
+
+func BenchmarkDMPFFullDomain(b *testing.B) {
+	// different dataSize
+	dataSizes := []int{10, 100, 1000, 10000, 100000}
+	for _, dataSize := range dataSizes {
+		prfKey := GeneratePRFKey()
+		client := DMPFInitialize(prfKey)
+		server := DMPFInitialize(prfKey)
+
+		rangeSize := 6 // log2(64)
+		rangePoint := 10
+		specialIndexes := make([]uint64, rangePoint)
+		used := make(map[uint64]bool)
+		num := 1 << rangeSize
+		for i := 0; i < rangePoint; {
+			idx := uint64(rand.Intn(num))
+			if !used[idx] {
+				used[idx] = true
+				specialIndexes[i] = idx
+				i++
+			}
+		}
+		slices.Sort(specialIndexes)
+		data := make([]byte, rangePoint*dataSize)
+		rand.Read(data)
+
+		keyA, keyB := client.GenDMPFKeys(specialIndexes, uint(rangeSize), uint(rangePoint), uint(dataSize), data)
+
+		// time the full domain evaluation
+		start := time.Now()
+		ans0 := server.FullDomainEval(keyA)
+		ans1 := server.FullDomainEval(keyB)
+		elapsed := time.Since(start)
+
+		// Verify that the results are consistent
+		if len(ans0) != len(ans1) {
+			b.Fatalf("DMPF FullDomain failed for dataSize: %d", dataSize)
+		}
+		fmt.Printf("DMPF FullDomain time: %s, dataSize: %d, resultSize: %d\n", elapsed, dataSize, len(ans0))
 	}
 }
 

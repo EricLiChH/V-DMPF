@@ -63,9 +63,20 @@ static void printBytes(void *p, int num)
 	printf("\n");
 }
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 EVP_CIPHER_CTX *getDPFContext(uint8_t *key);
 void destroyContext(EVP_CIPHER_CTX *ctx);
 uint128_t getRandomBlock();
 void dpfPRG(EVP_CIPHER_CTX *ctx, uint128_t input, uint128_t *output1, uint128_t *output2, int *bit1, int *bit2);
+
+// Comparison function for uint64_t values (for qsort)
+int compareUint64(const void *a, const void *b);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

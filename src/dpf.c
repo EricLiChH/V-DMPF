@@ -9,8 +9,8 @@
 // - https://github.com/ucbrise/dory/blob/master/src/c/dpf.h
 // - https://github.com/sachaservan/private-ann/tree/main/pir/dpfc
 
-#include "../include/common.h"
 #include "../include/dpf.h"
+#include "../include/common.h"
 #include "../include/mmo.h"
 #include <openssl/rand.h>
 

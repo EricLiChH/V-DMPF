@@ -11,8 +11,20 @@ type DPFKey struct {
 	RangeSize uint
 }
 
+type DMPFKey struct {
+	Bytes      []byte
+	DataSize   uint
+	RangeSize  uint
+	RangePoint uint
+}
+
 type Dpf struct {
 	PrfKey PrfKey
+	ctx    PrfCtx
+}
+
+type Dmpf struct {
+	prfKey PrfKey
 	ctx    PrfCtx
 }
 
@@ -50,6 +62,10 @@ func GeneratePRFKey() PrfKey {
 	return randKey
 }
 
+func DMPFInitialize(prfKey PrfKey) *Dmpf {
+	return &Dmpf{prfKey, InitDPFContext(prfKey[:])}
+}
+
 func VDPFInitialize(prfKey PrfKey, hashKeys [2]HashKey) *Vdpf {
 
 	prfctx := InitVDPFContext(prfKey[:])
@@ -62,6 +78,14 @@ func (dpf *Dpf) RequiredKeySize(dataSize uint, rangeSize uint) uint {
 
 func (dpf *Dpf) Free() {
 	DestroyDPFContext(dpf.ctx)
+}
+
+func (dmpf *Dmpf) RequiredKeySize(dataSize uint, rangeSize uint, rangePoint uint) uint {
+	return (24 * rangeSize * rangePoint) + 19 + dataSize*rangePoint
+}
+
+func (dmpf *Dmpf) Free() {
+	DestroyDPFContext(dmpf.ctx)
 }
 
 func (vdpf *Vdpf) RequiredKeySize(dataSize uint, rangeSize uint) uint {

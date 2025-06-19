@@ -1,3 +1,4 @@
+#include "../include/dmpf.h"
 #include "../include/dpf.h"
 #include "../include/mmo.h"
 #include "../include/vdpf.h"
@@ -268,6 +269,74 @@ int main(int argc, char *argv[]) {
     }
   }
   printf("Test[5] passed.\n");
+
+  // Test DMPF
+  printf("Test[6]: genDMPF & evalDMPF...\n");
+  EVP_CIPHER_CTX *ctx_dmpf = getDPFContext(aeskey);
+  // Test genDMPF
+  int t = 4;
+  unsigned char k0_dmpf[19 + SIZE * t * 24 + DATASIZE * t];
+  unsigned char k1_dmpf[19 + SIZE * t * 24 + DATASIZE * t];
+  uint64_t index_dmpf[] = {1, 2, 3, 4};
+  uint8_t data_dmpf[DATASIZE * t + 1]; // +1 for null terminator
+  for (int i = 0; i < DATASIZE * t; i++)
+    data_dmpf[i] = 'a';
+  data_dmpf[DATASIZE * t] = '\0';
+  genDMPF(ctx_dmpf, t, SIZE, index_dmpf, DATASIZE, data_dmpf, k0_dmpf, k1_dmpf);
+
+  for (uint64_t x = 0; x < t + 1; x++) {
+    uint8_t share0[DATASIZE * t], share1[DATASIZE * t];
+    memset(share0, 0, DATASIZE * t);
+    memset(share1, 0, DATASIZE * t);
+    evalDMPF(ctx_dmpf, x, DATASIZE, share0, k0_dmpf);
+    evalDMPF(ctx_dmpf, x, DATASIZE, share1, k1_dmpf);
+    uint8_t result[DATASIZE * t];
+    for (int i = 0; i < DATASIZE * t; i++)
+      result[i] = share0[i] ^ share1[i];
+    if (x != 0) {
+      if (memcmp(result, data_dmpf, DATASIZE) != 0) {
+        printf("Test[6] failed at index %lu: output mismatch!\n", x);
+        printf("Result: %s\n Expected: %s\n", result, data_dmpf);
+        return 1;
+      }
+    } else {
+      for (int i = 0; i < DATASIZE; i++) {
+        if (result[i] != 0) {
+          printf("Test[6] failed at index %lu: output mismatch!\n", x);
+          printf("Result: %s\n Expected: %s\n", result, "0");
+          return 1;
+        }
+      }
+    }
+  }
+  printf("Test[6] passed.\n");
+
+  // Test fullDomainDMPF
+  printf("Test[7]: fullDomainDMPF...\n");
+  uint8_t *out0_dmpf = (uint8_t *)malloc(domainSize * DATASIZE);
+  uint8_t *out1_dmpf = (uint8_t *)malloc(domainSize * DATASIZE);
+  fullDomainDMPF(ctx_dmpf, k0_dmpf, DATASIZE, out0_dmpf);
+  fullDomainDMPF(ctx_dmpf, k1_dmpf, DATASIZE, out1_dmpf);
+  for (int i = 0; i < domainSize; i++) {
+    for (int j = 0; j < DATASIZE; j++) {
+      result[j] = out0_dmpf[i * DATASIZE + j] ^ out1_dmpf[i * DATASIZE + j];
+    }
+    if (i >= 1 && i <= 4) {
+      if (memcmp(result, data_dmpf, DATASIZE) != 0) {
+        printf("Test[7] failed at index %lu: output mismatch!\n", i);
+        printf("Result: %s\n Expected: %s\n", result, data_dmpf);
+        return 1;
+      }
+    } else {
+      if (memcmp(result, all_zero, DATASIZE) != 0) {
+        printf("Test[7] failed at index %lu: output mismatch!\n", i);
+        printf("Result: %s\n Expected: %s\n", result, all_zero);
+        return 1;
+      }
+    }
+  }
+  printf("Test[7] passed.\n");
+
   printf("All tests passed :)\n");
   return 0;
 }

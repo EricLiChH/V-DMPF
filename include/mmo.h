@@ -17,7 +17,6 @@ struct Hash
    EVP_CIPHER_CTX *mmoCtx;
    int outblocks;
 };
-typedef struct hash Hash;
 
 // PRF cipher context
 extern struct Hash *initMMOHash(uint8_t *seed, uint64_t outblocks);

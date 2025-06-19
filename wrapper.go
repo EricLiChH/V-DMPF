@@ -6,10 +6,11 @@ package vdpf
 // Simon Langowski spent many hours debugging this.
 
 // #cgo CFLAGS: -I${SRCDIR}/include
-// #cgo LDFLAGS: ${SRCDIR}/src/libdpf.a -lcrypto -lssl -lm
+// #cgo LDFLAGS: ${SRCDIR}/src/libdpf.a -lcrypto -lssl -lm -lstdc++
 // #include "dpf.h"
 // #include "mmo.h"
 // #include "vdpf.h"
+// #include "dmpf.h"
 import "C"
 import (
 	"unsafe"
@@ -23,6 +24,10 @@ type Hash *C.struct_Hash
 
 func NewDPFKey(bytes []byte, dataSize uint, rangeSize uint) *DPFKey {
 	return &DPFKey{bytes, dataSize, rangeSize}
+}
+
+func NewDMPFKey(bytes []byte, dataSize uint, rangeSize uint, rangePoint uint) *DMPFKey {
+	return &DMPFKey{bytes, dataSize, rangeSize, rangePoint}
 }
 
 func InitDPFContext(prfKey []byte) PrfCtx {
@@ -41,12 +46,21 @@ func InitVDPFContext(prfKey []byte) PrfCtx {
 	return p
 }
 
+func InitDMPFContext(prfKey []byte) PrfCtx {
+	p := InitDPFContext(prfKey)
+	return p
+}
+
 func DestroyDPFContext(ctx PrfCtx) {
 	C.destroyContext(ctx)
 }
 
 func DestroyMMOHash(hash Hash) {
 	C.destroyMMOHash(hash)
+}
+
+func DestroyDMPFContext(ctx PrfCtx) {
+	C.destroyContext(ctx)
 }
 
 func (dpf *Dpf) GenDPFKeys(specialIndex uint64, rangeSize uint, dataSize uint, data []byte) (*DPFKey, *DPFKey) {
@@ -213,7 +227,7 @@ func (vdpf *Vdpf) FullDomainVerEval(key *DPFKey) ([]byte, []byte) {
 	pi := make([]byte, 16*HASH2BLOCKOUT)
 	res := make([]byte, int(key.DataSize)*resSize)
 
-	// 重新初始化哈希实例
+	// re-initialize hash instances
 	h1 := C.initMMOHash((*C.uint8_t)(unsafe.Pointer(&vdpf.H1Key)), C.uint64_t(HASH1BLOCKOUT))
 	h2 := C.initMMOHash((*C.uint8_t)(unsafe.Pointer(&vdpf.H2Key)), C.uint64_t(HASH2BLOCKOUT))
 	defer C.destroyMMOHash(h1)
@@ -230,4 +244,64 @@ func (vdpf *Vdpf) FullDomainVerEval(key *DPFKey) ([]byte, []byte) {
 	)
 
 	return res, pi
+}
+
+func (dmpf *Dmpf) GenDMPFKeys(specialIndexes []uint64, rangeSize uint, rangePoint uint, dataSize uint, data []byte) (*DMPFKey, *DMPFKey) {
+	if len(data) != int(dataSize*rangePoint) {
+		panic("invalid data size")
+	}
+	keySize := dmpf.RequiredKeySize(dataSize, rangeSize, rangePoint)
+	k0 := make([]byte, keySize)
+	k1 := make([]byte, keySize)
+
+	C.genDMPF(
+		dmpf.ctx,
+		C.int(rangePoint),
+		C.int(rangeSize),
+		(*C.uint64_t)(unsafe.Pointer(&specialIndexes[0])),
+		C.int(dataSize),
+		(*C.uint8_t)(unsafe.Pointer(&data[0])),
+		(*C.uint8_t)(unsafe.Pointer(&k0[0])),
+		(*C.uint8_t)(unsafe.Pointer(&k1[0])),
+	)
+
+	return NewDMPFKey(k0, dataSize, rangeSize, rangePoint), NewDMPFKey(k1, dataSize, rangeSize, rangePoint)
+}
+
+func (dmpf *Dmpf) EvalDMPF(key *DMPFKey, index uint64) []byte {
+
+	keySize := dmpf.RequiredKeySize(key.DataSize, key.RangeSize, key.RangePoint)
+	if len(key.Bytes) != int(keySize) {
+		panic("invalid key size")
+	}
+
+	res := make([]byte, key.DataSize)
+
+	C.evalDMPF(
+		dmpf.ctx,
+		C.uint64_t(index),
+		C.int(key.DataSize),
+		(*C.uint8_t)(unsafe.Pointer(&res[0])),
+		(*C.uint8_t)(unsafe.Pointer(&key.Bytes[0])),
+	)
+
+	return res
+}
+
+func (dmpf *Dmpf) FullDomainEval(key *DMPFKey) []byte {
+	if key.RangeSize > 32 {
+		panic("range size is too big for full domain evaluation")
+	}
+
+	keySize := dmpf.RequiredKeySize(key.DataSize, key.RangeSize, key.RangePoint)
+	if len(key.Bytes) != int(keySize) {
+		panic("invalid key size")
+	}
+
+	resSize := 1 << key.RangeSize
+	res := make([]byte, int(key.DataSize)*resSize)
+
+	C.fullDomainDMPF(dmpf.ctx, (*C.uint8_t)(unsafe.Pointer(&key.Bytes[0])), C.int(key.DataSize), (*C.uint8_t)(unsafe.Pointer(&res[0])))
+
+	return res
 }

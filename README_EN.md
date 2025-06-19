@@ -1,17 +1,16 @@
 # V-DMPF: C Implementation of Big-State DMPF and Verified DPF
 
-A C language implementation of Big-State DMPF (Distributed Multi-Point Function) based on Elette Boyle's [IEEE S&P paper](https://github.com/MatanHamilis/dmpf/).
-The V-DMPF also implements a Veryfied DPF referred to sachaservan's [vdpf code](https://github.com/sachaservan/vdpf).
+A C language implementation of Big-State DMPF (Distributed Multi-Point Function) based on Rust reference code.
 
 ## Overview
 
 DMPF is a cryptographic primitive that enables secure function evaluation at multiple input points. This implementation uses the "big state" approach, which optimizes performance by maintaining larger state, particularly suitable for batch operations.
 
-VDPF (Verified Distributed Point Function) that extends the standard DPF with verification capabilities. It allows parties to verify the correctness of DPF evaluations without revealing the underlying function or input data. The verification is achieved through cryptographic commitments and zero-knowledge proof techniques.
-
 ## Key Features
 
-- **Big-State Architecture**: Based on `big_state.rs` implementation from DMPF's Rust code
+- **Big-State Architecture**: Based on `big_state.rs` implementation from Rust code
+- **Batch Processing**: Optimized for bulk operations
+- **Binary Tree Structure**: Uses trie structure for efficient input processing
 - **Memory Safety**: Proper memory management and error handling
 
 ## Project Structure
@@ -33,18 +32,21 @@ VDPF (Verified Distributed Point Function) that extends the standard DPF with ve
 ```
 
 ## Core Components
-### Main Functions for DMPF
+
+### Data Structures
+
+- **Signs**: Maintains sign bits
+- **SignsCW**: Correction word sign data structure
+- **BinaryTrie**: Binary tree for input organization
+- **CW**: Correction word structure
+- **ConvCW**: Conversion correction word structure
+- **BigStateDmpfKey**: DMPF key structure
+
+### Main Functions
 
 - `genBigStateDMPF()`: Generate DMPF key pair
 - `evalBigStateDMPF()`: Evaluate DMPF at a single point
 - `genDMPF()`: Standard DMPF interface (delegates to big state implementation)
-
-### Main Functions for VDPF
-- `genVDPF()`: Generate VDPF key pair with verification
-- `evalVDPF()`: Evaluate VDPF at a single point with verification
-- `fullDomainVDPF()`: Full domain evaluation for VDPF
-- `verifyVDPF()`: Verify VDPF evaluation results
-
 
 ## Build and Run
 
@@ -101,7 +103,36 @@ evalBigStateDMPF(ctx, k1, 10, data_size, output1);
 // output0 XOR output1 should equal the data for input point 10
 ```
 
-## Reference
-- [Improved Constructions for Distributed Multi-Point Functions](https://www.computer.org/csdl/proceedings-article/sp/2025/223600a044/21B7Qx0bxLi)
-- [Lightweight, Maliciously Secure Verifiable Function Secret Sharing](https://eprint.iacr.org/2021/580)
-- [Function Secret Sharing: Improvements and Extensions](https://eprint.iacr.org/2018/707)
+## Implementation Details
+
+### Rust Code Correspondence
+
+This C implementation directly corresponds to the following Rust components:
+
+- `Signs` ↔ `big_state.rs::Signs`
+- `SignsCW` ↔ `big_state.rs::SignsCW`
+- `BinaryTrie` ↔ `trie.rs::BinaryTrie`
+- `CW` ↔ `big_state.rs::CW`
+- `ConvCW` ↔ `big_state.rs::ConvCW`
+
+### Optimizations
+
+- **Batch Processing**: Uses precomputed tables for bulk operations
+- **Memory Layout**: Optimized memory layout for better cache performance
+- **Tree Traversal**: Efficient binary tree traversal algorithms
+
+## Security
+
+- Uses OpenSSL's cryptographically secure PRG
+- Proper random number generation
+- Memory cleanup to prevent information leakage
+
+## Limitations
+
+- Inputs must be pre-sorted
+- Current implementation is simplified and may need further optimization for production-level performance
+- Key serialization format is simplified
+
+## License
+
+This implementation is based on the original V-DMPF project license. 

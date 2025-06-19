@@ -33,7 +33,9 @@
 
 #define FIELDMASK ((1L << FIELDBITS) - 1)
 
+struct Hash;  // Forward declaration
 typedef struct Hash hash;
+
 typedef __int128 int128_t;
 typedef unsigned __int128 uint128_t;
 

@@ -79,3 +79,13 @@ void dpfPRG(EVP_CIPHER_CTX *ctx, uint128_t input, uint128_t *output1, uint128_t 
     *output1 = set_lsb_zero(stash[0]);
     *output2 = set_lsb_zero(stash[1]);
 }
+
+// Comparison function for uint64_t values (for qsort)
+int compareUint64(const void *a, const void *b) {
+    uint64_t val_a = *(const uint64_t*)a;
+    uint64_t val_b = *(const uint64_t*)b;
+    
+    if (val_a < val_b) return -1;
+    if (val_a > val_b) return 1;
+    return 0;
+}
