@@ -62,7 +62,7 @@ make
 ### Run Tests
 
 ```bash
-make test
+make test && ./test
 ```
 
 ### Clean
