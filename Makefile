@@ -1,46 +1,40 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -O2 -std=c99
-LDFLAGS = -lssl -lcrypto
+TARGET = test
+CFLAGS = -g -O0
+CXXFLAGS = -g -O0 -std=c++17
+LDFLAGS = -lcrypto -lssl -lm -lstdc++
 
-# Directories
-SRCDIR = src
-INCDIR = include
-OBJDIR = obj
+$(TARGET): src/test.o libdpf.a
+	g++ $^ -o $@ $(LDFLAGS)
 
-# Source files
-SOURCES = $(SRCDIR)/dpf.c $(SRCDIR)/dmpf.c $(SRCDIR)/common.c $(SRCDIR)/mmo.c
-OBJECTS = $(SOURCES:$(SRCDIR)/%.c=$(OBJDIR)/%.o)
+src/test.o: src/test.c include/dpf.h
+	gcc $(CFLAGS) -Iinclude -c $< -o $@ $(LDFLAGS)
 
-# Test program
-TEST_TARGET = test_dmpf
-TEST_SOURCE = test_dmpf.c
+libdpf.a: src/dpf.o src/vdpf.o src/mmo.o src/common.o src/sha256.o src/dmpf.o src/big_state.o
+	ar rcs $@ $^
 
-# Default target
-all: $(TEST_TARGET)
+src/dpf.o: src/dpf.c include/dpf.h
+	gcc $(CFLAGS) -Iinclude -c -o $@ $< $(LDFLAGS)
 
-# Create object directory
-$(OBJDIR):
-	mkdir -p $(OBJDIR)
+src/mmo.o: src/mmo.c include/mmo.h 
+	gcc $(CFLAGS) -Iinclude -c -o $@ $< $(LDFLAGS)
 
-# Compile object files
-$(OBJDIR)/%.o: $(SRCDIR)/%.c | $(OBJDIR)
-	$(CC) $(CFLAGS) -I$(INCDIR) -c $< -o $@
+src/vdpf.o: src/vdpf.c include/vdpf.h
+	gcc $(CFLAGS) -Iinclude -c -o $@ $< $(LDFLAGS)
 
-# Build test program
-$(TEST_TARGET): $(OBJECTS) $(TEST_SOURCE) | $(OBJDIR)
-	$(CC) $(CFLAGS) -I$(INCDIR) $(TEST_SOURCE) $(OBJECTS) -o $@ $(LDFLAGS)
+src/dmpf.o: src/dmpf.cc include/dmpf.h
+	g++ $(CXXFLAGS) -Iinclude -c -o $@ $< $(LDFLAGS)
 
-# Clean build files
+src/big_state.o: src/big_state.cc include/dpf.h include/mmo.h include/common.h
+	g++ $(CXXFLAGS) -Iinclude -c -o $@ $< $(LDFLAGS)
+
+src/common.o: src/common.c include/common.h
+	gcc $(CFLAGS) -Iinclude -c -o $@ $< $(LDFLAGS)
+
+src/sha256.o: src/sha256.c include/sha256.h
+	gcc $(CFLAGS) -Iinclude -c -o $@ $< $(LDFLAGS)
+
+big_state: src/big_state.cc src/dpf.o src/common.o src/mmo.o
+	g++ -g -O0 -Wall -Wextra -std=c++17 -Iinclude $^ -o $@ -lssl -lcrypto
+
 clean:
-	rm -rf $(OBJDIR)
-	rm -f $(TEST_TARGET)
-
-# Run tests
-test: $(TEST_TARGET)
-	./$(TEST_TARGET)
-
-# Debug build
-debug: CFLAGS += -g -DDEBUG
-debug: $(TEST_TARGET)
-
-.PHONY: all clean test debug 
+	rm -f src/*.o *.a $(TARGET) big_state 
