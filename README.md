@@ -1,6 +1,6 @@
-# V-DMPF: C Implementation of Big-State DMPF and Verified DPF
+# V-DMPF: C & Go Implementation of Big-State DMPF and Verified DPF
 
-A C language implementation of Big-State DMPF (Distributed Multi-Point Function) based on Elette Boyle's [IEEE S&P paper](https://github.com/MatanHamilis/dmpf/).
+A C & GoLang implementation of Big-State DMPF (Distributed Multi-Point Function) based on Elette Boyle's [IEEE S&P paper](https://github.com/MatanHamilis/dmpf/).
 The V-DMPF also implements a Veryfied DPF referred to sachaservan's [vdpf code](https://github.com/sachaservan/vdpf).
 
 ## Overview
@@ -23,11 +23,12 @@ VDPF (Verified Distributed Point Function) that extends the standard DPF with ve
 │   ├── dmpf.h        # DMPF definitions
 │   └── mmo.h         # MMO hash definitions
 ├── src/
+│   ├── test.c        # C-Lib test file
 │   ├── common.c      # Common function implementations
 │   ├── dpf.c         # DPF implementation
-│   ├── dmpf.c        # DMPF implementation
+│   ├── dmpf.cc       # DMPF implementation
 │   └── mmo.c         # MMO hash implementation
-├── test_dmpf.c       # Test program
+├── vdpf_test.go      # Test program
 ├── Makefile          # Build configuration
 └── README.md         # Documentation
 ```
@@ -47,6 +48,8 @@ VDPF (Verified Distributed Point Function) that extends the standard DPF with ve
 
 
 ## Build and Run
+
+> For `C` code:
 
 ### Dependencies
 
@@ -69,6 +72,20 @@ make test && ./test
 
 ```bash
 make clean
+```
+
+For `GoLang` code:
+
+### Build
+
+```bash
+go mod tidy && go build .
+```
+
+### Run Tests
+
+```bash
+go test
 ```
 
 ## Usage Example

@@ -445,11 +445,18 @@ void fullDomainBigStateDMPF(EVP_CIPHER_CTX *ctx, unsigned char *k, int dataSize,
     {
         bit = 1 << (t - 1);
     }
-    std::vector<uint128_t> seeds((1 << size));
-    std::vector<int> bits((1 << size));
+    
+    // Pre-calculate constants
+    int domainSize = 1 << size;
+    int cwOffset = HEAD_SIZE + size * t * DMPF_CW_SIZE;
+    
+    // Pre-allocate vectors with exact size to avoid reallocation
+    std::vector<uint128_t> seeds(domainSize);
+    std::vector<int> bits(domainSize);
     seeds[0] = root; // root seed
     bits[0] = bit;   // root bit
 
+    // Pre-allocate CWs vector once and reuse
     std::vector<CW> CWs(t);
     uint128_t sCW;
     int tCW0, tCW1;
@@ -457,35 +464,25 @@ void fullDomainBigStateDMPF(EVP_CIPHER_CTX *ctx, unsigned char *k, int dataSize,
     uint128_t sL, sR;
     int tL, tR;
 
-    // // construct Path
-    // std::vector<std::set<uint64_t>> path(size + 1);
-    // for (int i = 1; i <= size; i++)
-    // {
-    //     // 0 to 2^i - 1
-    //     for (int j = 0; j < (1 << i); j++)
-    //     {
-    //         path[i].insert(j);
-    //     }
-    // }
-    // path[0].insert(0); // empty string in the first layer
+    // Pre-allocate next vectors to avoid repeated allocation
+    std::vector<uint128_t> nextSeeds(domainSize);
+    std::vector<int> nextBits(domainSize);
 
     for (int i = 1; i <= size; i++)
     {
-        CWs.clear();
-        CWs.resize(t);
+        // Load CWs for this layer - reuse the same vector
         for (int j = 0; j < t; j++)
         {
-            memcpy(&sCW, &k[HEAD_SIZE + ((i - 1) * t + j) * DMPF_CW_SIZE], 16);
-            memcpy(&tCW0, &k[HEAD_SIZE + ((i - 1) * t + j) * DMPF_CW_SIZE + 16], 4);
-            memcpy(&tCW1, &k[HEAD_SIZE + ((i - 1) * t + j) * DMPF_CW_SIZE + 20], 4);
+            int offset = HEAD_SIZE + ((i - 1) * t + j) * DMPF_CW_SIZE;
+            memcpy(&sCW, &k[offset], 16);
+            memcpy(&tCW0, &k[offset + 16], 4);
+            memcpy(&tCW1, &k[offset + 20], 4);
             CWs[j] = std::make_tuple(sCW, tCW0, tCW1);
         }
 
-        std::vector<uint128_t> nextSeeds(1 << size);
-        std::vector<int> nextBits(1 << size);
-        for (int j = 0; j < (1 << (i - 1)); j++)
+        int prevLayerSize = 1 << (i - 1);
+        for (int j = 0; j < prevLayerSize; j++)
         {
-            // current prefix - removed unused variable warning
             dmpfPRG(ctx, t, seeds[j], &sL, &sR, &tL, &tR);
             auto [sCW, tCW0, tCW1] = bigStateCorrect(t, bits[j], CWs);
 
@@ -495,30 +492,36 @@ void fullDomainBigStateDMPF(EVP_CIPHER_CTX *ctx, unsigned char *k, int dataSize,
             nextBits[2 * j + 1] = tR ^ tCW1;
         }
 
-        seeds = std::move(nextSeeds);
-        bits = std::move(nextBits);
+        // Swap vectors instead of move to avoid deallocation
+        seeds.swap(nextSeeds);
+        bits.swap(nextBits);
     }
 
-    // generate dataShare
-    int len = 0;
-    int domainSize = 1 << size;
+    // Pre-allocate zeros buffer once
     uint8_t *zeros = (uint8_t *)malloc(dataSize + 16);
     if (!zeros)
     {
         std::cerr << "Failed to allocate memory for zeros" << std::endl;
         return;
     }
+    memset(zeros, 0, dataSize + 16);
     memset(out, 0, domainSize * dataSize); // Initialize out with zeros
 
+    // Pre-allocate a single EVP_CIPHER_CTX and reuse it
+    EVP_CIPHER_CTX *seedCtx = EVP_CIPHER_CTX_new();
+    if (!seedCtx)
+    {
+        printf("errors occurred in creating context\n");
+        free(zeros);
+        return;
+    }
+
+    int len = 0;
     for (int i = 0; i < domainSize; i++)
     {
-        EVP_CIPHER_CTX *seedCtx;
-        if (!(seedCtx = EVP_CIPHER_CTX_new()))
-        {
-            printf("errors occurred in creating context\n");
-            free(zeros);
-            return;
-        }
+        // Reset context for each iteration instead of creating new one
+        EVP_CIPHER_CTX_reset(seedCtx);
+        
         if (1 != EVP_EncryptInit_ex(seedCtx, EVP_aes_128_ctr(), NULL,
                                     (uint8_t *)&seeds[i], NULL))
         {
@@ -534,20 +537,22 @@ void fullDomainBigStateDMPF(EVP_CIPHER_CTX *ctx, unsigned char *k, int dataSize,
             free(zeros);
             return;
         }
-        EVP_CIPHER_CTX_free(seedCtx);
 
+        // Apply correction words - cache the offset calculation
+        uint8_t *outPtr = out + i * dataSize;
         for (int j = 0; j < t; j++)
         {
-            // Fixed: getbit(bits[i], t, j + 1) instead of getbit(bits[i], size, j + 1)
             if (getbit(bits[i], t, j + 1) == 1)
             {
+                uint8_t *cwPtr = k + cwOffset + j * dataSize;
                 for (int l = 0; l < dataSize; l++)
                 {
-                    out[i * dataSize + l] ^= k[HEAD_SIZE + size * t * DMPF_CW_SIZE + j * dataSize + l];
+                    outPtr[l] ^= cwPtr[l];
                 }
             }
         }
     }
 
+    EVP_CIPHER_CTX_free(seedCtx);
     free(zeros);
 }
