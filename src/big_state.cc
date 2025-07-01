@@ -19,14 +19,20 @@ const int HEAD_SIZE = 19;
 const int DMPF_CW_SIZE = 24;
 
 // Export these functions with C linkage so they can be called from C code
-extern "C" {
+extern "C"
+{
     void genBigStateDMPF(EVP_CIPHER_CTX *ctx, int t, int size, uint64_t *index, int dataSize,
                          uint8_t *data, uint8_t *k0, uint8_t *k1);
-    
+
     void evalBigStateDMPF(EVP_CIPHER_CTX *ctx, uint64_t index, int dataSize, uint8_t *dataShare,
                           uint8_t *k);
-    
+
     void fullDomainBigStateDMPF(EVP_CIPHER_CTX *ctx, unsigned char *k, int dataSize, uint8_t *out);
+    
+    void BigStateCompress(EVP_CIPHER_CTX *ctx, int t, int size, uint64_t *index, int dataSize,
+                          uint8_t *data, uint8_t *key);
+    
+    void BigStateDecompress(EVP_CIPHER_CTX *ctx, uint8_t *key, int dataSize, uint8_t *out);
 }
 
 CW bigStateCorrect(const int &t, const int &index, const std::vector<CW> &CWs)
@@ -445,11 +451,11 @@ void fullDomainBigStateDMPF(EVP_CIPHER_CTX *ctx, unsigned char *k, int dataSize,
     {
         bit = 1 << (t - 1);
     }
-    
+
     // Pre-calculate constants
     int domainSize = 1 << size;
     int cwOffset = HEAD_SIZE + size * t * DMPF_CW_SIZE;
-    
+
     // Pre-allocate vectors with exact size to avoid reallocation
     std::vector<uint128_t> seeds(domainSize);
     std::vector<int> bits(domainSize);
@@ -521,7 +527,7 @@ void fullDomainBigStateDMPF(EVP_CIPHER_CTX *ctx, unsigned char *k, int dataSize,
     {
         // Reset context for each iteration instead of creating new one
         EVP_CIPHER_CTX_reset(seedCtx);
-        
+
         if (1 != EVP_EncryptInit_ex(seedCtx, EVP_aes_128_ctr(), NULL,
                                     (uint8_t *)&seeds[i], NULL))
         {
@@ -551,6 +557,225 @@ void fullDomainBigStateDMPF(EVP_CIPHER_CTX *ctx, unsigned char *k, int dataSize,
                 }
             }
         }
+    }
+
+    EVP_CIPHER_CTX_free(seedCtx);
+    free(zeros);
+}
+
+void BigStateCompress(EVP_CIPHER_CTX *ctx, int t, int size, uint64_t *index, int dataSize,
+                      uint8_t *data, uint8_t *key)
+{
+    // Generate the big state DMPF keys
+    uint8_t *k0 = (uint8_t *)malloc(HEAD_SIZE + size * t * DMPF_CW_SIZE + t * dataSize);
+    uint8_t *k1 = (uint8_t *)malloc(HEAD_SIZE + size * t * DMPF_CW_SIZE + t * dataSize);
+
+    genBigStateDMPF(ctx, t, size, index, dataSize, data, k0, k1);
+
+    // Generate compressed keys
+    int compressedSize = (CWSIZE + 16) + size * t * DMPF_CW_SIZE +
+                         t * dataSize;
+    key[0] = size;
+    key[1] = t;
+    memcpy(&key[2], &k0[2], 16);
+    memcpy(&key[18], &k1[2], 16);
+    memcpy(&key[34], &k0[HEAD_SIZE], size * t * DMPF_CW_SIZE + t * dataSize);
+    
+    // Clean up
+    free(k0);
+    free(k1);
+}
+
+void BigStateDecompress(EVP_CIPHER_CTX *ctx, uint8_t *key, int dataSize, uint8_t *out)
+{
+    // Extract size and t from the key
+    int size = key[0];
+    int t = key[1];
+
+    // Extract the root seeds from the key
+    uint128_t root0, root1;
+    memcpy(&root0, &key[2], 16);
+    memcpy(&root1, &key[18], 16);
+
+    // Pre-calculate constants
+    int domainSize = 1 << size;
+    int cwOffset = 34 + size * t * DMPF_CW_SIZE; // 34 = 2 + 16 + 16 (size, t, root0, root1)
+
+    // Pre-allocate vectors with exact size to avoid reallocation
+    std::vector<uint128_t> seeds0(domainSize);
+    std::vector<uint128_t> seeds1(domainSize);
+    std::vector<int> bits0(domainSize);
+    std::vector<int> bits1(domainSize);
+    
+    // Initialize root seeds and bits
+    seeds0[0] = root0;
+    seeds1[0] = root1;
+    bits0[0] = 0;            // L
+    bits1[0] = 1 << (t - 1); // R
+
+    // Pre-allocate CWs vector once and reuse
+    std::vector<CW> CWs(t);
+    uint128_t sCW;
+    int tCW0, tCW1;
+
+    uint128_t sL0, sR0, sL1, sR1;
+    int tL0, tR0, tL1, tR1;
+
+    // Pre-allocate next vectors to avoid repeated allocation
+    std::vector<uint128_t> nextSeeds0(domainSize);
+    std::vector<uint128_t> nextSeeds1(domainSize);
+    std::vector<int> nextBits0(domainSize);
+    std::vector<int> nextBits1(domainSize);
+
+    for (int i = 1; i <= size; i++)
+    {
+        // Load CWs for this layer - reuse the same vector
+        for (int j = 0; j < t; j++)
+        {
+            int offset = 34 + ((i - 1) * t + j) * DMPF_CW_SIZE;
+            memcpy(&sCW, &key[offset], 16);
+            memcpy(&tCW0, &key[offset + 16], 4);
+            memcpy(&tCW1, &key[offset + 20], 4);
+            CWs[j] = std::make_tuple(sCW, tCW0, tCW1);
+        }
+
+        int prevLayerSize = 1 << (i - 1);
+        for (int j = 0; j < prevLayerSize; j++)
+        {
+            // PRG for both seeds
+            dmpfPRG(ctx, t, seeds0[j], &sL0, &sR0, &tL0, &tR0);
+            dmpfPRG(ctx, t, seeds1[j], &sL1, &sR1, &tL1, &tR1);
+            
+            // Correction for both seeds
+            auto [sCW0, tCW0Left, tCW0Right] = bigStateCorrect(t, bits0[j], CWs);
+            auto [sCW1, tCW1Left, tCW1Right] = bigStateCorrect(t, bits1[j], CWs);
+
+            // Update next layer for both seeds
+            nextSeeds0[2 * j] = sL0 ^ sCW0;
+            nextSeeds0[2 * j + 1] = sR0 ^ sCW0;
+            nextBits0[2 * j] = tL0 ^ tCW0Left;
+            nextBits0[2 * j + 1] = tR0 ^ tCW0Right;
+
+            nextSeeds1[2 * j] = sL1 ^ sCW1;
+            nextSeeds1[2 * j + 1] = sR1 ^ sCW1;
+            nextBits1[2 * j] = tL1 ^ tCW1Left;
+            nextBits1[2 * j + 1] = tR1 ^ tCW1Right;
+        }
+
+        // Swap vectors instead of move to avoid deallocation
+        seeds0.swap(nextSeeds0);
+        seeds1.swap(nextSeeds1);
+        bits0.swap(nextBits0);
+        bits1.swap(nextBits1);
+    }
+
+    // Pre-allocate zeros buffer once
+    uint8_t *zeros = (uint8_t *)malloc(dataSize + 16);
+    if (!zeros)
+    {
+        std::cerr << "Failed to allocate memory for zeros" << std::endl;
+        return;
+    }
+    memset(zeros, 0, dataSize + 16);
+    memset(out, 0, domainSize * dataSize); // Initialize out with zeros
+
+    // Pre-allocate a single EVP_CIPHER_CTX and reuse it
+    EVP_CIPHER_CTX *seedCtx = EVP_CIPHER_CTX_new();
+    if (!seedCtx)
+    {
+        printf("errors occurred in creating context\n");
+        free(zeros);
+        return;
+    }
+
+    int len = 0;
+    for (int i = 0; i < domainSize; i++)
+    {
+        // Reset context for each iteration instead of creating new one
+        EVP_CIPHER_CTX_reset(seedCtx);
+
+        // Generate data for both seeds
+        uint8_t *outPtr = out + i * dataSize;
+        
+        // Generate data for seed0
+        if (1 != EVP_EncryptInit_ex(seedCtx, EVP_aes_128_ctr(), NULL,
+                                    (uint8_t *)&seeds0[i], NULL))
+        {
+            printf("errors occurred in init of dpf eval\n");
+            EVP_CIPHER_CTX_free(seedCtx);
+            free(zeros);
+            return;
+        }
+        if (1 != EVP_EncryptUpdate(seedCtx, outPtr, &len, zeros, dataSize))
+        {
+            printf("errors occurred in encrypt\n");
+            EVP_CIPHER_CTX_free(seedCtx);
+            free(zeros);
+            return;
+        }
+
+        // Apply correction words for seed0
+        for (int j = 0; j < t; j++)
+        {
+            if (getbit(bits0[i], t, j + 1) == 1)
+            {
+                uint8_t *cwPtr = key + cwOffset + j * dataSize;
+                for (int l = 0; l < dataSize; l++)
+                {
+                    outPtr[l] ^= cwPtr[l];
+                }
+            }
+        }
+
+        // Generate data for seed1 and XOR with seed0 result
+        EVP_CIPHER_CTX_reset(seedCtx);
+        if (1 != EVP_EncryptInit_ex(seedCtx, EVP_aes_128_ctr(), NULL,
+                                    (uint8_t *)&seeds1[i], NULL))
+        {
+            printf("errors occurred in init of dpf eval\n");
+            EVP_CIPHER_CTX_free(seedCtx);
+            free(zeros);
+            return;
+        }
+        
+        uint8_t *tempData = (uint8_t *)malloc(dataSize);
+        if (!tempData)
+        {
+            printf("errors occurred in memory allocation\n");
+            EVP_CIPHER_CTX_free(seedCtx);
+            free(zeros);
+            return;
+        }
+        
+        if (1 != EVP_EncryptUpdate(seedCtx, tempData, &len, zeros, dataSize))
+        {
+            printf("errors occurred in encrypt\n");
+            EVP_CIPHER_CTX_free(seedCtx);
+            free(zeros);
+            free(tempData);
+            return;
+        }
+
+        // Apply correction words for seed1
+        for (int j = 0; j < t; j++)
+        {
+            if (getbit(bits1[i], t, j + 1) == 1)
+            {
+                uint8_t *cwPtr = key + cwOffset + j * dataSize;
+                for (int l = 0; l < dataSize; l++)
+                {
+                    tempData[l] ^= cwPtr[l];
+                }
+            }
+        }
+
+        // XOR the results from both seeds
+        for (int l = 0; l < dataSize; l++)
+        {
+            outPtr[l] ^= tempData[l];
+        }
+        
+        free(tempData);
     }
 
     EVP_CIPHER_CTX_free(seedCtx);

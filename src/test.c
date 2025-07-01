@@ -337,6 +337,55 @@ int main(int argc, char *argv[]) {
   }
   printf("Test[7] passed.\n");
 
+  // Test compress and decompress
+  printf("Test[8]: compress and decompress...\n");
+  // prepare inputs
+  int t_big = 2;
+  int size_big = SIZE;
+  int domainSize_big = 1 << size_big;
+  uint64_t index_big[2] = {2, 5};
+  uint8_t data_big[2 * DATASIZE];
+  for (int i = 0; i < 2 * DATASIZE; i++)
+    data_big[i] = (uint8_t)(rand() & 0xFF);
+
+  // calculate compressed key size
+  int compressedKeySize = 34 + size_big * t_big * 24 + t_big * DATASIZE;
+  uint8_t *compressedKey = (uint8_t *)malloc(compressedKeySize);
+
+  EVP_CIPHER_CTX *ctx_big = getDPFContext(aeskey);
+  // compress
+  compressDMPF(ctx_big, t_big, size_big, index_big, DATASIZE, data_big,
+               compressedKey);
+
+  // decompress
+  uint8_t *decompressed = (uint8_t *)malloc(domainSize_big * DATASIZE);
+  decompressDMPF(ctx_big, compressedKey, DATASIZE, decompressed);
+
+  // verify
+  int ok = 1;
+  for (int i = 0; i < domainSize_big; i++) {
+    int is_target = (i == index_big[0] || i == index_big[1]);
+    uint8_t *expected = NULL;
+    if (i == index_big[0])
+      expected = &data_big[0 * DATASIZE];
+    else if (i == index_big[1])
+      expected = &data_big[1 * DATASIZE];
+    else {
+      uint8_t all0[DATASIZE];
+      memset(all0, 0, DATASIZE);
+      expected = all0;
+    }
+    if (memcmp(&decompressed[i * DATASIZE], expected, DATASIZE) != 0) {
+      printf("Test[8] failed at index %d\n", i);
+      ok = 0;
+    }
+  }
+  if (ok)
+    printf("Test[8] passed.\n");
+  free(compressedKey);
+  free(decompressed);
+  destroyContext(ctx_big);
+
   printf("All tests passed :)\n");
   return 0;
 }

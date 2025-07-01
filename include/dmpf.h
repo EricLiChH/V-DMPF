@@ -42,6 +42,26 @@ extern "C"
     //   out: output array (must be pre-allocated)
     void fullDomainDMPF(EVP_CIPHER_CTX *ctx, uint8_t *k, int dataSize, uint8_t *out);
 
+    // Compress Big State DMPF keys
+    // Parameters:
+    //   ctx: EVP_CIPHER_CTX pointer for encryption context
+    //   t: number of parties
+    //   size: size parameter
+    //   index: array of indices
+    //   dataSize: size of data
+    //   data: input data array
+    //   key: output compressed key (must be pre-allocated)
+    void compressDMPF(EVP_CIPHER_CTX *ctx, int t, int size, uint64_t *index,
+                      int dataSize, uint8_t *data, uint8_t *key);
+
+    // Decompress Big State DMPF keys
+    // Parameters:
+    //   ctx: EVP_CIPHER_CTX pointer for encryption context
+    //   key: input compressed key
+    //   dataSize: size of data
+    //   out: output array (must be pre-allocated)
+    void decompressDMPF(EVP_CIPHER_CTX *ctx, uint8_t *key, int dataSize, uint8_t *out);
+
 #ifdef __cplusplus
 }
 #endif

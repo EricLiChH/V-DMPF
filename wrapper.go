@@ -6,7 +6,7 @@ package vdpf
 // Simon Langowski spent many hours debugging this.
 
 // #cgo CFLAGS: -I${SRCDIR}/include
-// #cgo LDFLAGS: ${SRCDIR}/src/libdpf.a -lcrypto -lssl -lm -lstdc++
+// #cgo LDFLAGS: -L${SRCDIR} -ldpf -lcrypto -lssl -lm -lstdc++
 // #include "dpf.h"
 // #include "mmo.h"
 // #include "vdpf.h"
@@ -28,6 +28,10 @@ func NewDPFKey(bytes []byte, dataSize uint, rangeSize uint) *DPFKey {
 
 func NewDMPFKey(bytes []byte, dataSize uint, rangeSize uint, rangePoint uint) *DMPFKey {
 	return &DMPFKey{bytes, dataSize, rangeSize, rangePoint}
+}
+
+func NewCompressedDMPFKey(bytes []byte, dataSize uint, rangeSize uint, rangePoint uint) *CompressedDMPFKey {
+	return &CompressedDMPFKey{bytes, dataSize, rangeSize, rangePoint}
 }
 
 func InitDPFContext(prfKey []byte) PrfCtx {
@@ -302,6 +306,46 @@ func (dmpf *Dmpf) FullDomainEval(key *DMPFKey) []byte {
 	res := make([]byte, int(key.DataSize)*resSize)
 
 	C.fullDomainDMPF(dmpf.ctx, (*C.uint8_t)(unsafe.Pointer(&key.Bytes[0])), C.int(key.DataSize), (*C.uint8_t)(unsafe.Pointer(&res[0])))
+
+	return res
+}
+
+func (dmpf *Dmpf) CompressDMPF(specialIndexes []uint64, rangeSize uint, rangePoint uint, dataSize uint, data []byte) *CompressedDMPFKey {
+	if len(data) != int(dataSize*rangePoint) {
+		panic("invalid data size")
+	}
+
+	// Calculate compressed key size: 34 + size * t * 24 + t * dataSize
+	compressedKeySize := 34 + int(rangeSize)*int(rangePoint)*24 + int(rangePoint)*int(dataSize)
+	compressedKey := make([]byte, compressedKeySize)
+
+	C.compressDMPF(
+		dmpf.ctx,
+		C.int(rangePoint),
+		C.int(rangeSize),
+		(*C.uint64_t)(unsafe.Pointer(&specialIndexes[0])),
+		C.int(dataSize),
+		(*C.uint8_t)(unsafe.Pointer(&data[0])),
+		(*C.uint8_t)(unsafe.Pointer(&compressedKey[0])),
+	)
+
+	return NewCompressedDMPFKey(compressedKey, dataSize, rangeSize, rangePoint)
+}
+
+func (compressedKey *CompressedDMPFKey) Decompress(ctx PrfCtx) []byte {
+	if compressedKey.RangeSize > 32 {
+		panic("range size is too big for full domain evaluation")
+	}
+
+	resSize := 1 << compressedKey.RangeSize
+	res := make([]byte, int(compressedKey.DataSize)*resSize)
+
+	C.decompressDMPF(
+		ctx,
+		(*C.uint8_t)(unsafe.Pointer(&compressedKey.Bytes[0])),
+		C.int(compressedKey.DataSize),
+		(*C.uint8_t)(unsafe.Pointer(&res[0])),
+	)
 
 	return res
 }

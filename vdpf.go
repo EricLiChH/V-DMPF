@@ -1,6 +1,8 @@
 package vdpf
 
-import "crypto/rand"
+import (
+	"crypto/rand"
+)
 
 type PrfKey [16]byte
 type HashKey [16]byte
@@ -12,6 +14,13 @@ type DPFKey struct {
 }
 
 type DMPFKey struct {
+	Bytes      []byte
+	DataSize   uint
+	RangeSize  uint
+	RangePoint uint
+}
+
+type CompressedDMPFKey struct {
 	Bytes      []byte
 	DataSize   uint
 	RangeSize  uint

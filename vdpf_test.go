@@ -1,9 +1,3 @@
-
-
-
-
-
-
 package vdpf
 
 import (
@@ -350,6 +344,127 @@ func TestCorrectMultiPointFunctionTwoServerFullDomain(t *testing.T) {
 	}
 }
 
+func TestCorrectCompressDecompressDMPF(t *testing.T) {
+	for trial := 0; trial < numTrials; trial++ {
+		num := 1 << 4
+		// Generate unique random indices to ensure strictly ascending order
+		usedIndices := make(map[uint64]bool)
+		specialIndexes := make([]uint64, 0, 4)
+		for len(specialIndexes) < 4 {
+			idx := uint64(rand.Intn(num))
+			if !usedIndices[idx] {
+				usedIndices[idx] = true
+				specialIndexes = append(specialIndexes, idx)
+			}
+		}
+		// Sort specialIndexes in ascending order as required by the C++ implementation
+		slices.Sort(specialIndexes)
+
+		// Generate data for each special index
+		data := make([]byte, 4*10) // 4 indices * 10 bytes each
+		for i := range data {
+			data[i] = byte(rand.Intn(256))
+		}
+
+		prfKey := GeneratePRFKey()
+		client := DMPFInitialize(prfKey)
+		server := DMPFInitialize(prfKey)
+
+		// Test compression
+		compressedKey := client.CompressDMPF(specialIndexes, 4, 4, 10, data)
+
+		// Test decompression
+		decompressedData := compressedKey.Decompress(server.ctx)
+
+		// Verify the results
+		for i := 0; i < num; i++ {
+			if slices.Contains(specialIndexes, uint64(i)) {
+				// Find the position of i in specialIndexes array
+				var dataIndex int
+				for j, idx := range specialIndexes {
+					if idx == uint64(i) {
+						dataIndex = j
+						break
+					}
+				}
+				// Check if the data is correct
+				for j := 0; j < 10; j++ {
+					expected := data[dataIndex*10+j]
+					actual := decompressedData[i*10+j]
+					if expected != actual {
+						t.Fatalf("Trial %v: At index %v, position %v: Expected: %v Got: %v",
+							trial, i, j, expected, actual)
+					}
+				}
+			} else {
+				// Check if the data is 0
+				for j := 0; j < 10; j++ {
+					if decompressedData[i*10+j] != 0 {
+						t.Fatalf("Trial %v: At index %v, position %v: Expected: 0 Got: %v",
+							trial, i, j, decompressedData[i*10+j])
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestCorrectCompressDecompressDMPFFullDomain(t *testing.T) {
+	for trial := 0; trial < numTrials; trial++ {
+		num := 1 << 4
+		// Generate unique random indices to ensure strictly ascending order
+		usedIndices := make(map[uint64]bool)
+		specialIndexes := make([]uint64, 0, 4)
+		for len(specialIndexes) < 4 {
+			idx := uint64(rand.Intn(num))
+			if !usedIndices[idx] {
+				usedIndices[idx] = true
+				specialIndexes = append(specialIndexes, idx)
+			}
+		}
+		// Sort specialIndexes in ascending order as required by the C++ implementation
+		slices.Sort(specialIndexes)
+
+		// Generate data for each special index
+		data := make([]byte, 4*10) // 4 indices * 10 bytes each
+		for i := range data {
+			data[i] = byte(rand.Intn(256))
+		}
+
+		prfKey := GeneratePRFKey()
+		client := DMPFInitialize(prfKey)
+		server := DMPFInitialize(prfKey)
+
+		// Generate regular DMPF keys for comparison
+		keyA, keyB := client.GenDMPFKeys(specialIndexes, 4, 4, 10, data)
+
+		// Get regular full domain evaluation
+		regularAns0 := server.FullDomainEval(keyA)
+		regularAns1 := server.FullDomainEval(keyB)
+		regularResult := make([]byte, len(regularAns0))
+		for i := range regularAns0 {
+			regularResult[i] = regularAns0[i] ^ regularAns1[i]
+		}
+
+		// Test compression and decompression
+		compressedKey := client.CompressDMPF(specialIndexes, 4, 4, 10, data)
+		decompressedData := compressedKey.Decompress(server.ctx)
+
+		// Verify that compressed/decompressed result matches regular result
+		if len(decompressedData) != len(regularResult) {
+			t.Fatalf("Trial %v: Length mismatch: Expected %v Got %v",
+				trial, len(regularResult), len(decompressedData))
+		}
+
+		for i := 0; i < len(decompressedData); i++ {
+			if decompressedData[i] != regularResult[i] {
+				t.Fatalf("Trial %v: At position %v: Expected: %v Got: %v",
+					trial, i, regularResult[i], decompressedData[i])
+			}
+		}
+	}
+}
+
 func BenchmarkDPFFullDomain(b *testing.B) {
 	// different dataSize
 	dataSizes := []int{10, 100, 1000, 10000, 100000}
@@ -487,6 +602,46 @@ func BenchmarkDMPFFullDomain(b *testing.B) {
 			b.Fatalf("DMPF FullDomain failed for dataSize: %d", dataSize)
 		}
 		fmt.Printf("DMPF FullDomain time: %s, dataSize: %d, resultSize: %d\n", elapsed, dataSize, len(ans0))
+	}
+}
+
+func BenchmarkDMPFCompressDecompress(b *testing.B) {
+	// different dataSize
+	dataSizes := []int{10, 100, 1000, 10000, 100000}
+	for _, dataSize := range dataSizes {
+		prfKey := GeneratePRFKey()
+		client := DMPFInitialize(prfKey)
+		server := DMPFInitialize(prfKey)
+
+		rangeSize := 6 // log2(64)
+		rangePoint := 4
+		specialIndexes := make([]uint64, rangePoint)
+		used := make(map[uint64]bool)
+		num := 1 << rangeSize
+		for i := 0; i < rangePoint; {
+			idx := uint64(rand.Intn(num))
+			if !used[idx] {
+				used[idx] = true
+				specialIndexes[i] = idx
+				i++
+			}
+		}
+		slices.Sort(specialIndexes)
+
+		data := make([]byte, rangePoint*dataSize)
+		rand.Read(data)
+
+		// Time the compression and decompression
+		start := time.Now()
+		compressedKey := client.CompressDMPF(specialIndexes, uint(rangeSize), uint(rangePoint), uint(dataSize), data)
+		decompressedData := compressedKey.Decompress(server.ctx)
+		elapsed := time.Since(start)
+
+		// Verify that the results are consistent
+		if len(decompressedData) != (1<<rangeSize)*dataSize {
+			b.Fatalf("DMPF Compress/Decompress failed for dataSize: %d", dataSize)
+		}
+		fmt.Printf("DMPF Compress/Decompress time: %s, dataSize: %d, resultSize: %d\n", elapsed, dataSize, len(decompressedData))
 	}
 }
 
