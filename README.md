@@ -7,7 +7,7 @@ The V-DMPF also implements a Veryfied DPF referred to sachaservan's [vdpf code](
 
 DMPF is a cryptographic primitive that enables secure function evaluation at multiple input points. This implementation uses the "big state" approach, which optimizes performance by maintaining larger state, particularly suitable for batch operations.
 
-VDPF (Verified Distributed Point Function) that extends the standard DPF with verification capabilities. It allows parties to verify the correctness of DPF evaluations without revealing the underlying function or input data. The verification is achieved through cryptographic commitments and zero-knowledge proof techniques.
+VDMPF (Verified Distributed Multiple Points Function) that extends the standard DMPF with verification capabilities. It allows parties to verify the correctness of DMPF evaluations without revealing the underlying function or input data. The verification is achieved through cryptographic commitments and zero-knowledge proof techniques.
 
 ## Key Features
 
@@ -17,35 +17,46 @@ VDPF (Verified Distributed Point Function) that extends the standard DPF with ve
 ## Project Structure
 
 ```
-├── include/
-│   ├── common.h      # Common definitions and utilities
-│   ├── dpf.h         # DPF definitions
-│   ├── dmpf.h        # DMPF definitions
-│   └── mmo.h         # MMO hash definitions
-├── src/
-│   ├── test.c        # C-Lib test file
-│   ├── common.c      # Common function implementations
-│   ├── dpf.c         # DPF implementation
-│   ├── dmpf.cc       # DMPF implementation
-│   └── mmo.c         # MMO hash implementation
-├── vdpf_test.go      # Test program
-├── Makefile          # Build configuration
-└── README.md         # Documentation
+├── include/                    # Header files
+│   ├── common.h               # Common definitions and utilities
+│   ├── dpf.h                  # DPF (Distributed Point Function) definitions
+│   ├── vdpf.h                 # VDPF (Verifiable DPF) definitions
+│   ├── dmpf.h                 # DMPF (Distributed Multi-Point Function) definitions
+│   ├── vdmpf.h                # VDMPF (Verifiable DMPF) definitions
+│   ├── mmo.h                  # MMO hash definitions
+│   └── sha256.h               # SHA256 hash definitions
+├── src/                       # Source implementations
+│   ├── test.c                 # C library test suite
+│   ├── common.c               # Common utility functions
+│   ├── dpf.c                  # DPF implementation
+│   ├── vdpf.c                 # VDPF implementation
+│   ├── dmpf.cc                # DMPF implementation (C++)
+│   ├── vdmpf.cc               # VDMPF implementation (C++)
+│   ├── big_state.cc           # Big-state optimization implementation
+│   ├── mmo.c                  # MMO hash implementation
+│   └── sha256.c               # SHA256 hash implementation
+├── Go Bindings & Tests        # Go language interface
+│   ├── wrapper.go             # CGO wrapper for C functions
+│   ├── vdmpf.go               # Go type definitions and interfaces
+│   └── vdmpf_test.go          # Comprehensive test suite and benchmarks
+├── Build System
+│   ├── Makefile               # Build configuration
+│   ├── go.mod                 # Go module definition
+│   └── LICENSE                # License file
+└── README.md                  # Documentation
 ```
 
 ## Core Components
-### Main Functions for DMPF
-
-- `genBigStateDMPF()`: Generate DMPF key pair
-- `evalBigStateDMPF()`: Evaluate DMPF at a single point
-- `genDMPF()`: Standard DMPF interface (delegates to big state implementation)
 
 ### Main Functions for VDPF
-- `genVDPF()`: Generate VDPF key pair with verification
-- `evalVDPF()`: Evaluate VDPF at a single point with verification
-- `fullDomainVDPF()`: Full domain evaluation for VDPF
-- `verifyVDPF()`: Verify VDPF evaluation results
+- `genVDPF`: Generate VDPF key pair with verification
+- `evalVDPF`: Evaluate VDPF at a single point with verification
+- `fullDomainVDPF`: Full domain evaluation for VDPF
 
+### Main Functions for DMPF & VDMPF
+- `gen(V)DMPF`: Standard (V)DMPF generation interface (delegates to big state implementation)
+- `eval(V)DMPF`: Standard (V)DMPF evaluation interface for a specific point (delegates to big state implementation)
+- `fulldomain(V)DMPF`: Standard (V)DMPF fulldomain evaluation interface for all points (delegates to big state implementation)
 
 ## Build and Run
 

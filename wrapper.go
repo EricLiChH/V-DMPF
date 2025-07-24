@@ -1,9 +1,4 @@
-package vdpf
-
-// Testing in C the time goes from 7 to 4 seconds for 1000000 with the O3 flag
-// Since cgo removes all optimization flags we first compile a (optimized)
-// static library and then link it.
-// Simon Langowski spent many hours debugging this.
+package vdmpf
 
 // #cgo CFLAGS: -I${SRCDIR}/include
 // #cgo LDFLAGS: -L${SRCDIR} -ldpf -lcrypto -lssl -lm -lstdc++
@@ -11,13 +6,14 @@ package vdpf
 // #include "mmo.h"
 // #include "vdpf.h"
 // #include "dmpf.h"
+// #include "vdmpf.h"
 import "C"
 import (
 	"unsafe"
 )
 
-var HASH1BLOCKOUT uint = 4
-var HASH2BLOCKOUT uint = 2
+var HASH1BLOCKOUT uint = 4 // Matches test.c outblocks=4
+var HASH2BLOCKOUT uint = 2 // Matches test.c mmo_hash2 outblocks=2
 
 type PrfCtx *C.struct_evp_cipher_ctx_st
 type Hash *C.struct_Hash
@@ -53,6 +49,12 @@ func InitVDPFContext(prfKey []byte) PrfCtx {
 func InitDMPFContext(prfKey []byte) PrfCtx {
 	p := InitDPFContext(prfKey)
 	return p
+}
+
+func InitMMOHash(key HashKey, outBlocks uint) Hash {
+
+	h := C.initMMOHash((*C.uint8_t)(unsafe.Pointer(&key[0])), C.uint64_t(outBlocks))
+	return h
 }
 
 func DestroyDPFContext(ctx PrfCtx) {
@@ -348,4 +350,98 @@ func (compressedKey *CompressedDMPFKey) Decompress(ctx PrfCtx) []byte {
 	)
 
 	return res
+}
+
+func InitVDMPFContext(prfKey []byte) PrfCtx {
+	p := InitDPFContext(prfKey)
+	return p
+}
+
+func (vdmpf *Vdmpf) GenVDMPFKeys(specialIndexes []uint64, rangeSize uint, rangePoint uint, dataSize uint, data []byte) (*DMPFKey, *DMPFKey) {
+	if len(data) != int(dataSize*rangePoint) {
+		panic("invalid data size")
+	}
+	keySize := vdmpf.RequiredKeySize(dataSize, rangeSize, rangePoint)
+	k0 := make([]byte, keySize)
+	k1 := make([]byte, keySize)
+
+	h1 := C.initMMOHash((*C.uint8_t)(unsafe.Pointer(&vdmpf.H1Key)), C.uint64_t(HASH1BLOCKOUT))
+	defer C.destroyMMOHash(h1)
+
+	C.genVDMPF(
+		vdmpf.ctx,
+		h1,
+		C.int(rangePoint),
+		C.int(rangeSize),
+		(*C.uint64_t)(unsafe.Pointer(&specialIndexes[0])),
+		C.int(dataSize),
+		(*C.uint8_t)(unsafe.Pointer(&data[0])),
+		(*C.uint8_t)(unsafe.Pointer(&k0[0])),
+		(*C.uint8_t)(unsafe.Pointer(&k1[0])),
+	)
+
+	return NewDMPFKey(k0, dataSize, rangeSize, rangePoint), NewDMPFKey(k1, dataSize, rangeSize, rangePoint)
+}
+
+func (vdmpf *Vdmpf) EvalVDMPF(key *DMPFKey, index uint64) ([]byte, []byte) {
+	keySize := vdmpf.RequiredKeySize(key.DataSize, key.RangeSize, key.RangePoint)
+	if len(key.Bytes) != int(keySize) {
+		panic("invalid key size")
+	}
+
+	res := make([]byte, key.DataSize)
+	pi := make([]byte, 16*HASH2BLOCKOUT) // 32 bytes proof
+
+	// Initialize hash contexts exactly like test.c
+	h1 := C.initMMOHash((*C.uint8_t)(unsafe.Pointer(&vdmpf.H1Key)), C.uint64_t(HASH1BLOCKOUT))
+	h2 := C.initMMOHash((*C.uint8_t)(unsafe.Pointer(&vdmpf.H2Key)), C.uint64_t(HASH2BLOCKOUT))
+
+	C.evalVDMPF(
+		vdmpf.ctx,
+		h1,
+		h2,
+		C.uint64_t(index),
+		C.int(key.DataSize),
+		(*C.uint8_t)(unsafe.Pointer(&res[0])),
+		(*C.uint8_t)(unsafe.Pointer(&pi[0])),
+		(*C.uint8_t)(unsafe.Pointer(&key.Bytes[0])),
+	)
+
+	C.destroyMMOHash(h1)
+	C.destroyMMOHash(h2)
+
+	return res, pi
+}
+
+func (vdmpf *Vdmpf) FullDomainVerEval(key *DMPFKey) ([]byte, []byte) {
+	if key.RangeSize > 32 {
+		panic("range size is too big for full domain evaluation")
+	}
+
+	keySize := vdmpf.RequiredKeySize(key.DataSize, key.RangeSize, key.RangePoint)
+	if len(key.Bytes) != int(keySize) {
+		panic("invalid key size")
+	}
+
+	resSize := 1 << key.RangeSize
+	res := make([]byte, int(key.DataSize)*resSize)
+	pi := make([]byte, 16*HASH2BLOCKOUT)
+
+	// re-initialize hash instances
+	h1 := C.initMMOHash((*C.uint8_t)(unsafe.Pointer(&vdmpf.H1Key)), C.uint64_t(HASH1BLOCKOUT))
+	h2 := C.initMMOHash((*C.uint8_t)(unsafe.Pointer(&vdmpf.H2Key)), C.uint64_t(HASH2BLOCKOUT))
+	defer C.destroyMMOHash(h1)
+	defer C.destroyMMOHash(h2)
+
+	C.fullDomainVDMPF(
+		vdmpf.ctx,
+		h1,
+		h2,
+		C.int(key.DataSize),
+		(*C.uint8_t)(unsafe.Pointer(&key.Bytes[0])),
+		(*C.uint8_t)(unsafe.Pointer(&res[0])),
+		(*C.uint8_t)(unsafe.Pointer(&pi[0])),
+	)
+
+	return res, pi
 }

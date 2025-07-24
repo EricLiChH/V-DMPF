@@ -12,7 +12,7 @@
 #include <openssl/rand.h>
 #include <stdint.h>
 
-struct Sha_256 sha_256;
+extern struct Sha_256 sha_256;
 
 void genVDPF(EVP_CIPHER_CTX *ctx, struct Hash *hash, int size, uint64_t index,
              uint8_t *data, int dataSize, unsigned char *k0,

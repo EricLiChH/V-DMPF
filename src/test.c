@@ -1,6 +1,7 @@
 #include "../include/dmpf.h"
 #include "../include/dpf.h"
 #include "../include/mmo.h"
+#include "../include/vdmpf.h"
 #include "../include/vdpf.h"
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -385,6 +386,132 @@ int main(int argc, char *argv[]) {
   free(compressedKey);
   free(decompressed);
   destroyContext(ctx_big);
+
+  // Test VDMPF
+  printf("Test[9]: genVDMPF & evalVDMPF...\n");
+  EVP_CIPHER_CTX *ctx_vdmpf = getDPFContext(aeskey);
+  outblocks = 4;
+  RAND_bytes((uint8_t *)&hashkey1, sizeof(uint128_t));
+  RAND_bytes((uint8_t *)&hashkey2, sizeof(uint128_t));
+  mmo_hash1 = initMMOHash((uint8_t *)&hashkey1, outblocks);
+  mmo_hash2 = initMMOHash((uint8_t *)&hashkey2, outblocks);
+  // Test genVDMPF
+  t = 4;
+  int keySize_vdmpf = 19 + SIZE * t * 24 + DATASIZE * t + 16 * outblocks * t;
+  unsigned char k0_vdmpf[keySize_vdmpf];
+  unsigned char k1_vdmpf[keySize_vdmpf];
+  uint64_t index_vdmpf[] = {1, 2, 3, 4};
+  uint8_t data_vdmpf[DATASIZE * t + 1]; // +1 for null terminator
+  for (int i = 0; i < DATASIZE * t; i++)
+    data_vdmpf[i] = 'a';
+  data_vdmpf[DATASIZE * t] = '\0';
+
+  genVDMPF(ctx_vdmpf, mmo_hash1, t, SIZE, index_vdmpf, DATASIZE, data_vdmpf,
+           k0_vdmpf, k1_vdmpf);
+  destroyMMOHash(mmo_hash1);
+  destroyMMOHash(mmo_hash2);
+
+  // Test evalVDMPF
+
+  ok = true;
+  for (int i = 0; i < t + 1; i++) {
+    uint8_t vdmpf_pi0[32], vdmpf_pi1[32];
+    memset(vout0, 0, DATASIZE);
+    memset(vout1, 0, DATASIZE);
+
+    // eval server 0
+    mmo_hash1 = initMMOHash((uint8_t *)&hashkey1, outblocks);
+    mmo_hash2 = initMMOHash((uint8_t *)&hashkey2, 2);
+    evalVDMPF(ctx_vdmpf, mmo_hash1, mmo_hash2, i, DATASIZE, vout0, vdmpf_pi0,
+              k0_vdmpf);
+    destroyMMOHash(mmo_hash1);
+    destroyMMOHash(mmo_hash2);
+
+    // eval server 1
+    mmo_hash1 = initMMOHash((uint8_t *)&hashkey1, outblocks);
+    mmo_hash2 = initMMOHash((uint8_t *)&hashkey2, 2);
+    evalVDMPF(ctx_vdmpf, mmo_hash1, mmo_hash2, i, DATASIZE, vout1, vdmpf_pi1,
+              k1_vdmpf);
+    destroyMMOHash(mmo_hash1);
+    destroyMMOHash(mmo_hash2);
+
+    // check pi0 == pi1
+    if (memcmp(vdmpf_pi0, vdmpf_pi1, 32) != 0) {
+      printf("Test[9] failed at index %d: output hash mismatch!\n", i);
+      return 1;
+    }
+
+    // check vout0 ^ vout1 == data
+    for (int j = 0; j < DATASIZE; j++) {
+      result[j] = vout0[j] ^ vout1[j];
+    }
+    if (i != 0) {
+      if (memcmp(result, data_vdmpf, DATASIZE) != 0) {
+        printf("Test[9] failed at index %d: output mismatch!\n", i);
+        printf("Result: %s\n Expected: %s\n", result, data_vdmpf);
+        ok = false;
+      }
+    } else {
+      if (memcmp(result, all_zero, DATASIZE) != 0) {
+        printf("Test[9] failed at index %d: output mismatch!\n", i);
+        printf("Result: %s\n Expected: %s\n", result, all_zero);
+        ok = false;
+      }
+    }
+  }
+  if (!ok) {
+    printf("Test[9] failed.\n");
+    return 1;
+  }
+
+  printf("Test[9] passed.\n");
+
+  // Test fullDomainVDMPF
+  printf("Test[10]: fullDomainVDMPF...\n");
+  uint8_t *out0_vdmpf = (uint8_t *)malloc(domainSize * DATASIZE);
+  uint8_t *out1_vdmpf = (uint8_t *)malloc(domainSize * DATASIZE);
+
+  // server 0
+  mmo_hash1 = initMMOHash((uint8_t *)&hashkey1, outblocks);
+  mmo_hash2 = initMMOHash((uint8_t *)&hashkey2, outblocks);
+  fullDomainVDMPF(ctx_vdmpf, mmo_hash1, mmo_hash2, DATASIZE, k0_vdmpf,
+                  out0_vdmpf, pi0);
+  destroyMMOHash(mmo_hash1);
+  destroyMMOHash(mmo_hash2);
+
+  // server 1
+  mmo_hash1 = initMMOHash((uint8_t *)&hashkey1, outblocks);
+  mmo_hash2 = initMMOHash((uint8_t *)&hashkey2, outblocks);
+  fullDomainVDMPF(ctx_vdmpf, mmo_hash1, mmo_hash2, DATASIZE, k1_vdmpf,
+                  out1_vdmpf, pi1);
+  destroyMMOHash(mmo_hash1);
+  destroyMMOHash(mmo_hash2);
+
+  // check pi0 == pi1
+  if (memcmp(pi0, pi1, 32) != 0) {
+    printf("Test[10] failed: output hash mismatch!\n");
+    return 1;
+  }
+
+  // verify
+  for (int i = 0; i < domainSize; i++) {
+    for (int j = 0; j < DATASIZE; j++) {
+      result[j] = out0_vdmpf[i * DATASIZE + j] ^ out1_vdmpf[i * DATASIZE + j];
+    }
+    if (i == 1 || i == 2 || i == 3 || i == 4) {
+      if (memcmp(result, data_vdmpf, DATASIZE) != 0) {
+        printf("Test[10] failed at index %d: output mismatch!\n", i);
+        printf("Result: %s\n Expected: %s\n", result, data_vdmpf);
+        return 1;
+      }
+    } else {
+      if (memcmp(result, all_zero, DATASIZE) != 0) {
+        printf("Test[10] failed at index %d: output mismatch!\n", i);
+        printf("Result: %s\n Expected: %s\n", result, all_zero);
+        return 1;
+      }
+    }
+  }
 
   printf("All tests passed :)\n");
   return 0;

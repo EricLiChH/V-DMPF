@@ -1,4 +1,4 @@
-package vdpf
+package vdmpf
 
 import (
 	"bytes"
@@ -344,6 +344,128 @@ func TestCorrectMultiPointFunctionTwoServerFullDomain(t *testing.T) {
 	}
 }
 
+func TestCorrectVerMultiPointFunctionTwoServer(t *testing.T) {
+
+	for trial := 0; trial < numTrials; trial++ {
+		num := 1 << 4
+		// Generate unique random indices to ensure strictly ascending order
+		usedIndices := make(map[uint64]bool)
+		specialIndexes := make([]uint64, 0, 10)
+		for len(specialIndexes) < 10 {
+			idx := uint64(rand.Intn(num))
+			if !usedIndices[idx] {
+				usedIndices[idx] = true
+				specialIndexes = append(specialIndexes, idx)
+			}
+		}
+		// Sort specialIndexes in ascending order as required by the C++ implementation
+		slices.Sort(specialIndexes)
+
+		// Fix: Create data for 10 special indices, each with 1 byte of data
+		data := make([]byte, 10*1) // rangePoint * dataSize = 10 * 1
+		for i := range data {
+			data[i] = byte(rand.Intn(256))
+		}
+
+		prfKey := GeneratePRFKey()
+		hashKeys := GenerateVDMPFHashKeys()
+
+		client := VDMPFInitialize(prfKey, hashKeys)
+		keyA, keyB := client.GenVDMPFKeys(specialIndexes, 4, 10, 1, data)
+
+		// Fix: Don't regenerate hash keys - use the same ones for server
+		// hashKeys = GenerateVDMPFHashKeys() // REMOVED: This was causing the bug
+		server := VDMPFInitialize(prfKey, hashKeys) // Use same hashKeys
+
+		// test specialIndexes
+		for i, specialIndex := range specialIndexes {
+			ans0, pi0 := server.EvalVDMPF(keyA, specialIndex)
+			ans1, pi1 := server.EvalVDMPF(keyB, specialIndex)
+
+			if !bytes.Equal(pi0, pi1) {
+				fmt.Printf("pi0 =/= pi1\n%v\n%v\n", pi0, pi1)
+				t.Fatalf("pi0 =/= pi1")
+			}
+			// Fix: Each special index i should map to data[i] (since dataSize=1)
+			if ans0[0]^ans1[0] != data[i] {
+				fmt.Printf("specialIndexes[i] = %v\n", specialIndexes[i])
+				fmt.Printf("ans0 = %v\n", ans0)
+				fmt.Printf("ans1 = %v\n", ans1)
+				fmt.Printf("data = %v\n", data)
+				t.Fatalf("Expected: %v Got: %v", data[i], ans0[0]^ans1[0])
+			}
+		}
+
+		// test non-specialIndexes
+		for i := range num {
+			if slices.Contains(specialIndexes, uint64(i)) {
+				continue
+			}
+
+			ans0, pi0 := server.EvalVDMPF(keyA, uint64(i))
+			ans1, pi1 := server.EvalVDMPF(keyB, uint64(i))
+
+			if ans0[0]^ans1[0] != 0 {
+				fmt.Printf("indices[i] = %v\n", uint64(i))
+				fmt.Printf("ans0 = %v\n", ans0)
+				fmt.Printf("ans1 = %v\n", ans1)
+				t.Fatalf("Expected: %v Got: %v", 0, ans0[0]^ans1[0])
+			}
+			if !bytes.Equal(pi0, pi1) {
+				fmt.Printf("Index %v: pi0 =/= pi1\n%v\n%v\n", i, pi0, pi1)
+				t.Fatalf("pi0 =/= pi1")
+			}
+		}
+	}
+}
+
+func TestCorrectVerMultiPointFunctionTwoServerFullDomain(t *testing.T) {
+
+	for trial := 0; trial < numTrials; trial++ {
+		num := 1 << 4
+		// Generate unique random indices to ensure strictly ascending order
+		specialIndexes := []uint64{0, 1, 2, 3}
+		data := make([]byte, 4) // 4 indices * 1 byte each (dataSize=1)
+		for i := range data {
+			data[i] = byte(rand.Intn(256))
+		}
+		prfKey := GeneratePRFKey()
+		hashKeys := GenerateVDMPFHashKeys()
+		client := VDMPFInitialize(prfKey, hashKeys)
+
+		keyA, keyB := client.GenVDMPFKeys(specialIndexes, 4, 4, 1, data)
+
+		// Fix: Don't regenerate hash keys - use the same ones for server
+		// hashKeys = GenerateVDMPFHashKeys() // REMOVED: This was causing the bug
+		server := VDMPFInitialize(prfKey, hashKeys) // Use same hashKeys
+
+		ans0, pi0 := server.FullDomainVerEval(keyA)
+		ans1, pi1 := server.FullDomainVerEval(keyB)
+
+		if !bytes.Equal(pi0, pi1) {
+			fmt.Printf("pi0 =/= pi1\n%v\n%v\n", pi0, pi1)
+			t.Fatalf("pi0 =/= pi1")
+		}
+
+		for i := range num {
+			if i < 4 {
+				if ans0[i]^ans1[i] != data[i] {
+					t.Fatalf("Expected: %v Got: %v ^ %v = %v", data[i], ans0[i], ans1[i], ans0[i]^ans1[i])
+				}
+			} else {
+				// check if the data is 0
+				if ans0[i]^ans1[i] != 0 {
+					fmt.Printf("indices[i] = %v\n", uint64(i))
+					fmt.Printf("ans0 = %v\n", ans0)
+					fmt.Printf("ans1 = %v\n", ans1)
+					fmt.Printf("data = %v\n", data)
+					t.Fatalf("Expected: %v Got: %v", 0, ans0[i]^ans1[i])
+				}
+			}
+		}
+	}
+}
+
 func TestCorrectCompressDecompressDMPF(t *testing.T) {
 	for trial := 0; trial < numTrials; trial++ {
 		num := 1 << 4
@@ -642,6 +764,130 @@ func BenchmarkDMPFCompressDecompress(b *testing.B) {
 			b.Fatalf("DMPF Compress/Decompress failed for dataSize: %d", dataSize)
 		}
 		fmt.Printf("DMPF Compress/Decompress time: %s, dataSize: %d, resultSize: %d\n", elapsed, dataSize, len(decompressedData))
+	}
+}
+
+func BenchmarkVDMPFGenEval(b *testing.B) {
+	// different dataSize
+	dataSizes := []int{10, 100, 1000, 10000, 100000}
+	for _, dataSize := range dataSizes {
+		prfKey := GeneratePRFKey()
+		hashKeys := GenerateVDMPFHashKeys()
+		client := VDMPFInitialize(prfKey, hashKeys)
+		server := VDMPFInitialize(prfKey, hashKeys)
+
+		rangeSize := 6 // log2(64)
+		rangePoint := 4
+		specialIndexes := make([]uint64, rangePoint)
+		used := make(map[uint64]bool)
+		num := 1 << rangeSize
+		for i := 0; i < rangePoint; {
+			idx := uint64(rand.Intn(num))
+			if !used[idx] {
+				used[idx] = true
+				specialIndexes[i] = idx
+				i++
+			}
+		}
+		slices.Sort(specialIndexes)
+		data := make([]byte, rangePoint*dataSize)
+		rand.Read(data)
+
+		// time the key generation & evaluation
+		start := time.Now()
+		keyA, keyB := client.GenVDMPFKeys(specialIndexes, uint(rangeSize), uint(rangePoint), uint(dataSize), data)
+
+		// Evaluate for all special indices
+		for j := 0; j < rangePoint; j++ {
+			_, _ = server.EvalVDMPF(keyA, specialIndexes[j])
+			_, _ = server.EvalVDMPF(keyB, specialIndexes[j])
+		}
+		elapsed := time.Since(start)
+		fmt.Printf("VDMPF GenEval time: %s, dataSize: %d\n", elapsed, dataSize)
+	}
+}
+
+func BenchmarkVDMPFFullDomain(b *testing.B) {
+	// different dataSize
+	dataSizes := []int{10, 100, 1000, 10000, 100000}
+	for _, dataSize := range dataSizes {
+		prfKey := GeneratePRFKey()
+		hashKeys := GenerateVDMPFHashKeys()
+		client := VDMPFInitialize(prfKey, hashKeys)
+		server := VDMPFInitialize(prfKey, hashKeys)
+
+		rangeSize := 6 // log2(64)
+		rangePoint := 10
+		specialIndexes := make([]uint64, rangePoint)
+		used := make(map[uint64]bool)
+		num := 1 << rangeSize
+		for i := 0; i < rangePoint; {
+			idx := uint64(rand.Intn(num))
+			if !used[idx] {
+				used[idx] = true
+				specialIndexes[i] = idx
+				i++
+			}
+		}
+		slices.Sort(specialIndexes)
+		data := make([]byte, rangePoint*dataSize)
+		rand.Read(data)
+
+		keyA, keyB := client.GenVDMPFKeys(specialIndexes, uint(rangeSize), uint(rangePoint), uint(dataSize), data)
+
+		// time the full domain evaluation with verification
+		start := time.Now()
+		ans0, pi0 := server.FullDomainVerEval(keyA)
+		ans1, pi1 := server.FullDomainVerEval(keyB)
+		elapsed := time.Since(start)
+
+		// Verify that the results are consistent
+		if len(ans0) != len(ans1) || !bytes.Equal(pi0, pi1) {
+			b.Fatalf("VDMPF FullDomain failed for dataSize: %d", dataSize)
+		}
+		fmt.Printf("VDMPF FullDomain time: %s, dataSize: %d, resultSize: %d\n", elapsed, dataSize, len(ans0))
+	}
+}
+
+func BenchmarkVDMPFVerification(b *testing.B) {
+	// different dataSize
+	dataSizes := []int{10, 100, 1000, 10000, 100000}
+	for _, dataSize := range dataSizes {
+		prfKey := GeneratePRFKey()
+		hashKeys := GenerateVDMPFHashKeys()
+		client := VDMPFInitialize(prfKey, hashKeys)
+		server := VDMPFInitialize(prfKey, hashKeys)
+
+		rangeSize := 7 // log2(128)
+		rangePoint := 4
+		specialIndexes := make([]uint64, rangePoint)
+		used := make(map[uint64]bool)
+		num := 1 << rangeSize
+		for i := 0; i < rangePoint; {
+			idx := uint64(rand.Intn(num))
+			if !used[idx] {
+				used[idx] = true
+				specialIndexes[i] = idx
+				i++
+			}
+		}
+		slices.Sort(specialIndexes)
+		data := make([]byte, rangePoint*dataSize)
+		rand.Read(data)
+
+		keyA, keyB := client.GenVDMPFKeys(specialIndexes, uint(rangeSize), uint(rangePoint), uint(dataSize), data)
+
+		// time the evaluation & verification
+		start := time.Now()
+		_, pi0 := server.FullDomainVerEval(keyA)
+		_, pi1 := server.FullDomainVerEval(keyB)
+
+		//verification
+		if !bytes.Equal(pi0, pi1) {
+			b.Fatalf("VDMPF Verification failed for dataSize: %d", dataSize)
+		}
+		elapsed := time.Since(start)
+		fmt.Printf("VDMPF Verification time: %s, dataSize: %d\n", elapsed, dataSize)
 	}
 }
 

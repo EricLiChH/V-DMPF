@@ -1,4 +1,4 @@
-package vdpf
+package vdmpf
 
 import (
 	"crypto/rand"
@@ -43,6 +43,12 @@ type Vdpf struct {
 	H2Key HashKey
 }
 
+type Vdmpf struct {
+	Dmpf
+	H1Key HashKey
+	H2Key HashKey
+}
+
 func DPFInitialize(prfKey PrfKey) *Dpf {
 	return &Dpf{prfKey, InitDPFContext(prfKey[:])}
 }
@@ -50,6 +56,20 @@ func DPFInitialize(prfKey PrfKey) *Dpf {
 func GenerateVDPFHashKeys() [2]HashKey {
 	var hashKeys [2]HashKey
 
+	_, err := rand.Read(hashKeys[0][:])
+	if err != nil {
+		panic("Error generating randomness")
+	}
+	_, err = rand.Read(hashKeys[1][:])
+	if err != nil {
+		panic("Error generating randomness")
+	}
+
+	return hashKeys
+}
+
+func GenerateVDMPFHashKeys() [2]HashKey {
+	var hashKeys [2]HashKey
 	_, err := rand.Read(hashKeys[0][:])
 	if err != nil {
 		panic("Error generating randomness")
@@ -81,6 +101,11 @@ func VDPFInitialize(prfKey PrfKey, hashKeys [2]HashKey) *Vdpf {
 	return &Vdpf{Dpf{prfKey, prfctx}, hashKeys[0], hashKeys[1]}
 }
 
+func VDMPFInitialize(prfKey PrfKey, hashKeys [2]HashKey) *Vdmpf {
+	prfctx := InitVDMPFContext(prfKey[:])
+	return &Vdmpf{Dmpf{prfKey, prfctx}, hashKeys[0], hashKeys[1]}
+}
+
 func (dpf *Dpf) RequiredKeySize(dataSize uint, rangeSize uint) uint {
 	return (18 * rangeSize) + 18 + dataSize
 }
@@ -103,4 +128,12 @@ func (vdpf *Vdpf) RequiredKeySize(dataSize uint, rangeSize uint) uint {
 
 func (vdpf *Vdpf) Free() {
 	DestroyDPFContext(vdpf.ctx)
+}
+
+func (vdmpf *Vdmpf) RequiredKeySize(dataSize uint, rangeSize uint, rangePoint uint) uint {
+	return (19 + 24*rangeSize*rangePoint + dataSize*rangePoint + 16*4*rangePoint)
+}
+
+func (vdmpf *Vdmpf) Free() {
+	DestroyDPFContext(vdmpf.ctx)
 }

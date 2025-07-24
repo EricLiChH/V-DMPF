@@ -9,7 +9,7 @@ $(TARGET): src/test.o libdpf.a
 src/test.o: src/test.c include/dpf.h
 	gcc $(CFLAGS) -Iinclude -c $< -o $@ $(LDFLAGS)
 
-libdpf.a: src/dpf.o src/vdpf.o src/mmo.o src/common.o src/sha256.o src/dmpf.o src/big_state.o
+libdpf.a: src/dpf.o src/vdpf.o src/mmo.o src/common.o src/sha256.o src/dmpf.o src/vdmpf.o src/big_state.o
 	ar rcs $@ $^
 
 src/dpf.o: src/dpf.c include/dpf.h
@@ -20,6 +20,9 @@ src/mmo.o: src/mmo.c include/mmo.h
 
 src/vdpf.o: src/vdpf.c include/vdpf.h
 	gcc $(CFLAGS) -Iinclude -c -o $@ $< $(LDFLAGS)
+
+src/vdmpf.o: src/vdmpf.cc include/vdmpf.h
+	g++ $(CXXFLAGS) -Iinclude -c -o $@ $< $(LDFLAGS)
 
 src/dmpf.o: src/dmpf.cc include/dmpf.h
 	g++ $(CXXFLAGS) -Iinclude -c -o $@ $< $(LDFLAGS)
